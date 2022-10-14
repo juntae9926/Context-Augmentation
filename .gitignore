@@ -130,4 +130,6 @@ dmypy.json
 
 Dockerfile
 docker-compose.yml
-docker-compose-env
+docker-compose-env/
+VOCdevkit/
+runs/
