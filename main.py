@@ -97,7 +97,7 @@ def train(args, model, optimizer, scheduler, criterion, train_loader, valid_load
                     optimizer.zero_grad()
                     output = model(x)
                     loss = criterion(output, y)
-                    batch_bar.set_postfix(loss="{:.04f}".format(loss.item()), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
+                    batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
 
                     running_loss += loss
                     running_ap += get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
@@ -133,7 +133,7 @@ def train(args, model, optimizer, scheduler, criterion, train_loader, valid_load
                         optimizer.zero_grad()
                         output = model(x)
                         loss = criterion(output, y)
-                        batch_bar.set_postfix(loss="{:.04f}".format(loss.item()), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
+                        batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
 
                         running_loss += loss
                         running_ap += get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
@@ -154,6 +154,7 @@ def train(args, model, optimizer, scheduler, criterion, train_loader, valid_load
                     if val_map_ >= best_val_map:
                         best_val_map = val_map_
                         if not os.path.isdir(os.path.join(args.save_dir)):
+                            os.mkdir(args.save_dir)
                         torch.save(model.state_dict(), os.path.join(args.save_dir, "model-{}.pth".format(epoch)))
                         print("--- best model saved at {} ---".format(args.save_dir))
 
