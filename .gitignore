@@ -6,7 +6,6 @@ __pycache__/
 # C extensions
 *.so
 
-.idea
 # Distribution / packaging
 .Python
 build/
@@ -131,5 +130,8 @@ dmypy.json
 
 Dockerfile
 docker-compose.yml
-docker-compose-env
-/data/
+docker-compose-env/
+VOCdevkit/
+runs/
+data/
+.idea
