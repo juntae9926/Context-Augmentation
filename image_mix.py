@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import os
 import numpy as np
-
+import co_occurence
 import math
 
 #데이터 읽기 (VOC 폴더 내부에서 실행 , image, annotation 폴더와 같은 경로)
@@ -77,21 +77,35 @@ def make_mixed_image(img,mask,instance_img):
     return recon_img
 
 
+def generate_data(img_pairs):
+    for idx, pair in enumerate(img_pairs):
+        target_img = np.array(Image.open(os.path.join(path, 'JPEGImages', pair[1][1] + '.jpg')))
+        target_mask = np.array(Image.open(os.path.join(path, 'SegmentationClass', pair[1][1] + '.png')))
+        instance_img = make_instance(target_mask, target_img, 1)
+        # save_numpy_image('./result/instance_' + str(idx)+'.png', instance_img)
+        img2 = np.array(Image.open(os.path.join(path, 'JPEGImages', pair[0][1] + '.jpg')))
+        mask2 = np.array(Image.open(os.path.join(path, 'SegmentationClass', pair[0][1] + '.png')))
+        mixed_img = make_mixed_image(img2, mask2, instance_img)
+        save_numpy_image('./result/mixed_' + str(idx) + '.png', mixed_img)
+    return
 # Context-Augementation/data/ 하위에 ImageSet, Annotation 위치
 path=os.getcwd()+'/data'
 
-Train=Read_Data(path=path)
-Train=np.array(Train)
+# Train=Read_Data(path=path)
+# Train=np.array(Train)
 
-img = np.array(Image.open(Train[0][0]))
-mask = np.array(Image.open(Train[0][1]))
+# img = np.array(Image.open(Train[0][0]))
+# mask = np.array(Image.open(Train[0][1]))
+# instance_img = make_instance(mask, img, 1)
 
-instance_img=make_instance(mask,img,1)
+pairs = co_occurence.bg_target_pairs
+
+generate_data(pairs)
 
 #10개 테스트
-for i in range(1,11):
-    img2 = np.array(Image.open(Train[i][0]))
-    mask2 = np.array(Image.open(Train[i][1]))
-    mixed_img=make_mixed_image(img2,mask2,instance_img)
-    save_numpy_image('mixed_'+str(i)+'.png',mixed_img)
+# for i in range(1,11):
+#     img2 = np.array(Image.open(Train[i][0]))
+#     mask2 = np.array(Image.open(Train[i][1]))
+#     mixed_img=make_mixed_image(img2,mask2,instance_img)
+#     save_numpy_image('mixed_'+str(i)+'.png',mixed_img)
     
