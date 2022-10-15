@@ -1,9 +1,8 @@
-
 import matplotlib.pyplot as plt
 from PIL import Image
-import numpy as np
 import os
 import numpy as np
+
 import math
 
 #데이터 읽기 (VOC 폴더 내부에서 실행 , image, annotation 폴더와 같은 경로)
@@ -77,7 +76,9 @@ def make_mixed_image(img,mask,instance_img):
     #복원된 합성된 이미지 반환
     return recon_img
 
-path=os.getcwd()+'/'
+
+# Context-Augementation/data/ 하위에 ImageSet, Annotation 위치
+path=os.getcwd()+'/data'
 
 Train=Read_Data(path=path)
 Train=np.array(Train)
