@@ -1,51 +1,112 @@
 import random
 import os
 import numpy as np
-import matplotlib.pyplot as plt
-import xml.etree.ElementTree as ET
-import seaborn as sns
+import xml.etree.ElementTree as elemTree
 from PIL import Image
 from tqdm.notebook import tqdm
+# import matplotlib.pyplot as plt
+# import xml.etree.ElementTree as ET
+# import seaborn as sns
 
 
-def get_pair():
-    classes = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 
-    'bus', 'car', 'cat', 'chair', 'cow', 
-    'diningtable', 'dog', 'horse', 'motorbike', 'person', 
-    'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
-    classes = sorted(classes)
-    img_info = {}
-    for c in classes:
-        img_info[c] = []
+labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
+          'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
+          'train', 'tvmonitor']
+path = os.path.join(os.getcwd(), 'data/Annotations')
+label_img = {}
 
-    rootpath = os.getcwd()
-    filepath = rootpath + '/data/VOC2012/Annotations'
-    filelist = os.listdir(filepath)
-    for xmlfile in tqdm(filelist):
-        tree = ET.parse(filepath+'/'+xmlfile)
-        root = tree.getroot()
-        filename = [x.findtext('filename') for x in [root]]
-        segmented = [x.findtext('segmented') for x in [root]]
-        obj = root.findall('object')
-        classname = sorted(list(set([x.findtext('name') for x in obj])))
-        if segmented[0]=='1':
-            for c in classname:
-                img_info[c].append(filename[0])
+# def get_pair():
+#     classes = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
+#     'bus', 'car', 'cat', 'chair', 'cow',
+#     'diningtable', 'dog', 'horse', 'motorbike', 'person',
+#     'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+#     classes = sorted(classes)
+#     img_info = {}
+#     for c in classes:
+#         img_info[c] = []
+#
+#     rootpath = os.getcwd()
+#     filepath = rootpath + '/data/VOC2012/Annotations'
+#     filelist = os.listdir(filepath)
+#     for xmlfile in tqdm(filelist):
+#         tree = ET.parse(filepath+'/'+xmlfile)
+#         root = tree.getroot()
+#         filename = [x.findtext('filename') for x in [root]]
+#         segmented = [x.findtext('segmented') for x in [root]]
+#         obj = root.findall('object')
+#         classname = sorted(list(set([x.findtext('name') for x in obj])))
+#         if segmented[0]=='1':
+#             for c in classname:
+#                 img_info[c].append(filename[0])
+#
+#     cooccur = [[_ for _ in range(len(classes))] for _ in range(len(classes))]
+#     for i, (key1, value1) in tqdm(enumerate(img_info.items())):
+#         for j, (key2, value2) in enumerate(img_info.items()):
+#             tmp = len([x for x in value1 if x in value2])
+#             cooccur[i][j] = tmp
+#
+#     zeropair = []
+#     for x in range(len(classes)):
+#         for y in range(x, len(classes)):
+#             if cooccur[x][y]==0:
+#                 zeropair.append([classes[x],classes[y]])
+#
+#     return img_info, zeropair
+#
 
-    cooccur = [[_ for _ in range(len(classes))] for _ in range(len(classes))]
-    for i, (key1, value1) in tqdm(enumerate(img_info.items())):
-        for j, (key2, value2) in enumerate(img_info.items()):
-            tmp = len([x for x in value1 if x in value2])
-            cooccur[i][j] = tmp
-            
-    zeropair = []
-    for x in range(len(classes)):
-        for y in range(x, len(classes)):
-            if cooccur[x][y]==0:
-                zeropair.append([classes[x],classes[y]])
-    
-    return img_info, zeropair
-            
+# read files and return co-occurence matrix
+def get_comatrix(annot_path, segmented=False):
+    co_matrix = np.zeros([len(labels), len(labels)], dtype=int)
+    for annot in os.listdir(annot_path):
+        tree = elemTree.parse(os.path.join(annot_path, annot))
+        obj_list = tree.findall('./object')
+        is_segmented = tree.find('./segmented').text
+        if segmented and is_segmented == '0':
+            continue
+        occur_list = []
+        for item in obj_list:
+            obj = item.find('./name').text
+            if obj not in occur_list:
+                occur_list.append(obj)
+                label_img[obj].append(annot)
+        for occ_i in occur_list:
+            for occ_j in occur_list:
+                co_matrix[labels.index(occ_i)][labels.index(occ_j)] += 1
+    return co_matrix
+
+
+def initialize_dict():
+    for label in labels:
+        label_img.setdefault(label, [])
+
+
+def get_bg_target(unrel_list):
+    pairs = []
+    for unrel_pair in unrel_list:
+        bg = random.choice(label_img[labels[unrel_pair[0]]])
+        bg = str.split(bg, '.')[0]
+        t = random.choice(label_img[labels[unrel_pair[1]]])
+        t = str.split(t, '.')[0]
+        pairs.append([(unrel_pair[0], bg), (unrel_pair[1], t)])
+    return pairs
+
+def get_unrel_pairs(mat):
+    '''
+    :param mat: [[178, 0, 0, 1, ...],
+                 [0, 144, ...],...]
+    :return: [[(0, 2007_000032), (1, 2007_000033)], ...]
+            [[background, instance_target], ...]
+    '''
+
+    ret = []
+    zero_occur = np.where(mat == 0)
+    for i in range(len(zero_occur[0])):
+        ret.append([zero_occur[0][i], zero_occur[1][i]])
+    return ret
+
+
+
+
 """
 # 데이터 읽기
 def Read_Data(path, is_train = True):
@@ -170,4 +231,12 @@ def method2():
         save_numpy_image(f'data/method2/{class1}_{class2}.png', mixed_img)
         
 if __name__ ==  "__main__":
-    method2()
+    initialize_dict()
+    # segmented or non segmented data
+    co_occur = get_comatrix(path, segmented=True)
+    unrel_pairs = get_unrel_pairs(co_occur)
+
+    # 배경, 인스턴스 pair : [label_idx, filename] list . ex) [[(0, 2007_000032), (1, 2007_000033)], ... ]
+    bg_target_pairs = get_bg_target(unrel_pairs)
+
+    # method2()
