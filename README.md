@@ -11,6 +11,7 @@ Sogang Univ. Grad. Big-data project repository
 
 # Method 2 - image to patch level
 <img width="40%" src="https://user-images.githubusercontent.com/81060548/196677869-f73b9882-e4da-4509-9b0c-8d80e424993b.png"/>
+
 # Project Architecture
 ```shell
 ├─augmentation.py         # method1, method2, zero co-occurence pair 를 위한 함수 
