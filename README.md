@@ -1,5 +1,5 @@
 # Context-Augmentation
-Implementation of Context considered Data Augmentation 
+Implementation of Context considered Data Augmentation. <br>
 Sogang Univ. Grad. Big-data project repository
 
 ## Co-Occurence in PascalVOC2012
@@ -7,9 +7,10 @@ Sogang Univ. Grad. Big-data project repository
 
 ## Proposed Methods
 # Method 1 - using a bounding box or polygon segmentation
-<img width="60%" src="https://user-images.githubusercontent.com/81060548/196677700-6043b838-4b98-44f1-b88a-6770d684f0c5.png"/>
+<img width="40%" src="https://user-images.githubusercontent.com/81060548/196677700-6043b838-4b98-44f1-b88a-6770d684f0c5.png"/>
+
 # Method 2 - image to patch level
-<img width="60%" src="https://user-images.githubusercontent.com/81060548/196677869-f73b9882-e4da-4509-9b0c-8d80e424993b.png"/>
+<img width="40%" src="https://user-images.githubusercontent.com/81060548/196677869-f73b9882-e4da-4509-9b0c-8d80e424993b.png"/>
 # Project Architecture
 ```shell
 ├─augmentation.py         # method1, method2, zero co-occurence pair 를 위한 함수 
