@@ -2,7 +2,7 @@
 Implementation of Context considered Data Augmentation. <br>
 Sogang Univ. Grad. Big-data project repository
 
-## Co-Occurence in PascalVOC2012
+## Co-Occurence in PascalVOC2012 Dataset
 <img width="60%" src="https://user-images.githubusercontent.com/81060548/196676003-8572462f-b726-4254-92a2-86694d7ba197.png"/>
 
 # Proposed Methods
