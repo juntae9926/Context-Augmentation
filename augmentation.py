@@ -1,9 +1,12 @@
+from __future__ import annotations
+from asyncio.proactor_events import _ProactorBaseWritePipeTransport
 import random
 import os
 import numpy as np
 import xml.etree.ElementTree as elemTree
 from PIL import Image
 from tqdm.notebook import tqdm
+import xmltodict
 # import matplotlib.pyplot as plt
 # import xml.etree.ElementTree as ET
 # import seaborn as sns
@@ -12,7 +15,7 @@ from tqdm.notebook import tqdm
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
           'train', 'tvmonitor']
-path = os.path.join(os.getcwd(), 'data/Annotations')
+path = os.path.join(os.getcwd(), 'Annotations')
 label_img = {}
 
 # def get_pair():
@@ -122,21 +125,28 @@ def Read_Data(path, is_train = True):
 """
 
 # 데이터 읽기
-def read_data(path ,pair, img_info):
+def read_data(path ,pair,is_segmented=True):
     temp1 = []
     temp2 = []
-    for [class1,class2] in pair:
-        img1 = random.choice(img_info[class1])
-        img2 = random.choice(img_info[class2])
+    print(pair)
+    class1,class2= pair
+
+    path_img1 = os.path.join(path, "JPEGImages", class1[1]+".jpg")
+    path_img2 = os.path.join(path, "JPEGImages", class2[1]+".jpg")
+
+    path_label1 = os.path.join(path, "Annotations",class1[1]+".xml")
+    path_label2 = os.path.join(path, "Annotations",class2[1]+".xml")
+
+    if is_segmented:
+        path_mask1=os.path.join(path, "SegmentationClass", class1[1]+".png")
+        path_mask2=os.path.join(path, "SegmentationClass", class2[1]+".png")
+
+    else:
+        path_mask1=None
+        path_mask2=None
         
-        path_img1 = os.path.join(path, "JPEGImages", img1)
-        path_label1 = os.path.join(path, "SegmentationClass", img1.replace('jpg','png'))
-        
-        path_img2 = os.path.join(path, "JPEGImages", img2)
-        path_label2 = os.path.join(path, "SegmentationClass", img2.replace('jpg','png'))
-        
-        temp1.append([path_img1, path_label1, class1])
-        temp2.append([path_img2, path_label2, class2])
+    temp1.append([path_img1, path_label1, path_mask1])
+    temp2.append([path_img2, path_label2, path_mask2])
         
     return temp1, temp2
 
@@ -145,14 +155,39 @@ def save_numpy_image(file_name, img):
     img.save(file_name, 'png')
 
 # method 1에 사용되는 함수
-def make_instance(img, mask, label):  
-    mask = np.where(mask[:,:]!=label, 0, mask[:,:]) # mask img를 통해서 target label 제외하고 전부 0으로 변경
-    mask = np.where(mask[:,:]!=0, 1, mask[:,:]) # 잘린 instance 값(target label)을 1로 변경하여 곱 연산을 위한 mask로 변경
+def make_instance(mask,img,label):
+    mask=np.where(mask[:,:]!=label,0,mask[:,:]) #mask img를 통해서 원하는 label 제외하고 전부 0으로 변경
+    mask=np.where(mask[:,:]!=0,1,mask[:,:])# 잘린 instance 값을 1로 변경하여 곱 연산을 위한 mask로 변경 (1곱해서 그대로 두고 0곱해서 없애기) 
+    
     for i in range(img.shape[0]):
         for j in range(img.shape[1]):
-            img[i][j] = img[i][j] * mask[i][j] # rgb에 대한 mask 적용
-    # mask로 추출된 instance image (target label 영역을 제외하고 나머지는 0인 이미지) 추출
-    return img 
+            img[i][j]=img[i][j]*mask[i][j] # rgb에 대한 mask 적용
+
+    return img # mask로 추출된 instance image 추출( 원하는 부분만 원래 값을 사용하고, 나머지는 0인 이미지 )
+#methode 1d에 사용되는 함수
+def make_mask(img,label,instance_label):
+    bbox=[]
+    labels=[]
+    if isinstance(label,list):
+        labels=label[:]
+    else:
+        labels.append(label)
+
+    for i in labels: 
+
+        bbox.append([i['bndbox']['ymin'],i['bndbox']['ymax'],i['bndbox']['xmin'],i['bndbox']['xmax']])
+
+    for i in range(len(bbox)):
+        bbox[i]=list(map(int,bbox[i]))
+    
+    
+    mask=np.zeros((img.shape[0],img.shape[1]),dtype='uint8')
+    for i in bbox:
+        x_size,y_size=mask[i[0]:i[1],i[2]:i[3]].shape
+
+        mask[i[0]:i[1],i[2]:i[3]]=np.full([x_size,y_size],instance_label)
+        
+    return mask
 
 def make_mixed_image(img, mask, img2):
     y_axis = mask.shape[0]//2 # 4분면을 위한 중심 축 y
@@ -195,23 +230,34 @@ def make_mixed_image(img, mask, img2):
     # 복원된 합성 이미지 반환
     return recon_img
 
-def method1(): # 미완성
-    path = os.getcwd() + '/data/VOC2012'
-    img_info, pair = get_pair()
-    data1, data2 = read_data(path=path, pair=pair, img_info=img_info)
+def method1(pair,is_segmented=True):
+    
+    path=path=os.getcwd()
+    data1, data2 = read_data(path=path, pair=pair,is_segmented=is_segmented)
+    
+
+    img1 = np.array(Image.open(data1[0][0]))
+    img2 = np.array(Image.open(data2[0][0]))
+
+    label1=pair[0][0]+1
+    label2=pair[1][0]+1
+
+    if is_segmented:
+        mask1 = np.array(Image.open(data1[0][2]))
+        mask2 = np.array(Image.open(data2[0][2]))
+    else:
+        with open(data1[0][1]) as fd:
+            annotation1=xmltodict.parse(fd.read())
+        with open(data2[0][1]) as fd:
+            annotation2=xmltodict.parse(fd.read())
         
-    for i in tqdm(range(len(pair))):
-        img1 = np.array(Image.open(data1[i][0]))
-        mask1 = np.array(Image.open(data1[i][1]))
-        class1 = data1[i][2]
+        mask1=make_mask(img1,annotation1['annotation']['object'],label1)
+        mask2=make_mask(img2,annotation1['annotation']['object'],label2)
         
-        img2 = np.array(Image.open(data2[i][0]))
-        mask2 = np.array(Image.open(data2[i][1]))
-        class2 = data2[i][2]
-        
-        instance_img = make_instance(img2, mask2, label=1)
-        mixed_img = make_mixed_image(img1, mask1, img2)
-        save_numpy_image(f'data/method1/{class1}_{class2}.png', mixed_img)
+    instance_img=make_instance(mask1,img1,label1)
+    mixed_img = make_mixed_image(img2, mask2, instance_img)
+    save_numpy_image(f'test.png', mixed_img)
+    #return mixed_img
         
 def method2():
     path = os.getcwd() + '/data/VOC2012'
@@ -233,10 +279,15 @@ def method2():
 if __name__ ==  "__main__":
     initialize_dict()
     # segmented or non segmented data
-    co_occur = get_comatrix(path, segmented=True)
+    is_segmented=True
+
+    co_occur = get_comatrix(path, segmented=is_segmented)
     unrel_pairs = get_unrel_pairs(co_occur)
 
     # 배경, 인스턴스 pair : [label_idx, filename] list . ex) [[(0, 2007_000032), (1, 2007_000033)], ... ]
     bg_target_pairs = get_bg_target(unrel_pairs)
+
+    for i in bg_target_pairs:
+        method1(i,is_segmented) # 찾은 pair , segment 여부 input
 
     # method2()
