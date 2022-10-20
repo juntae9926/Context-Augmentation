@@ -7,6 +7,7 @@ import xml.etree.ElementTree as elemTree
 from PIL import Image
 from tqdm.notebook import tqdm
 import xmltodict
+import argparse
 # import matplotlib.pyplot as plt
 # import xml.etree.ElementTree as ET
 # import seaborn as sns
@@ -15,7 +16,6 @@ import xmltodict
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
           'train', 'tvmonitor']
-path = os.path.join(os.getcwd(), 'Annotations')
 label_img = {}
 
 # def get_pair():
@@ -58,7 +58,8 @@ label_img = {}
 #
 
 # read files and return co-occurence matrix
-def get_comatrix(annot_path, segmented=False):
+def get_comatrix(dataset_path, segmented=False):
+    annot_path = os.path.join(dataset_path, "Annotations")
     co_matrix = np.zeros([len(labels), len(labels)], dtype=int)
     for annot in os.listdir(annot_path):
         tree = elemTree.parse(os.path.join(annot_path, annot))
@@ -76,6 +77,7 @@ def get_comatrix(annot_path, segmented=False):
             for occ_j in occur_list:
                 co_matrix[labels.index(occ_i)][labels.index(occ_j)] += 1
     return co_matrix
+
 
 
 def initialize_dict():
@@ -125,21 +127,20 @@ def Read_Data(path, is_train = True):
 """
 
 # 데이터 읽기
-def read_data(path ,pair,is_segmented=True):
+def read_data(dataset_path ,pair ,is_segmented=True):
     temp1 = []
     temp2 = []
-    print(pair)
-    class1,class2= pair
+    class1,class2 = pair
 
-    path_img1 = os.path.join(path, "JPEGImages", class1[1]+".jpg")
-    path_img2 = os.path.join(path, "JPEGImages", class2[1]+".jpg")
+    path_img1 = os.path.join(dataset_path, "JPEGImages", class1[1]+".jpg")
+    path_img2 = os.path.join(dataset_path, "JPEGImages", class2[1]+".jpg")
 
-    path_label1 = os.path.join(path, "Annotations",class1[1]+".xml")
-    path_label2 = os.path.join(path, "Annotations",class2[1]+".xml")
+    path_label1 = os.path.join(dataset_path, "Annotations",class1[1]+".xml")
+    path_label2 = os.path.join(dataset_path, "Annotations",class2[1]+".xml")
 
     if is_segmented:
-        path_mask1=os.path.join(path, "SegmentationClass", class1[1]+".png")
-        path_mask2=os.path.join(path, "SegmentationClass", class2[1]+".png")
+        path_mask1=os.path.join(dataset_path, "SegmentationClass", class1[1]+".png")
+        path_mask2=os.path.join(dataset_path, "SegmentationClass", class2[1]+".png")
 
     else:
         path_mask1=None
@@ -155,7 +156,7 @@ def save_numpy_image(file_name, img):
     img.save(file_name, 'png')
 
 # method 1에 사용되는 함수
-def make_instance(mask,img,label):
+def make_instance(mask, img, label):
     mask=np.where(mask[:,:]!=label,0,mask[:,:]) #mask img를 통해서 원하는 label 제외하고 전부 0으로 변경
     mask=np.where(mask[:,:]!=0,1,mask[:,:])# 잘린 instance 값을 1로 변경하여 곱 연산을 위한 mask로 변경 (1곱해서 그대로 두고 0곱해서 없애기) 
     
@@ -174,12 +175,10 @@ def make_mask(img,label,instance_label):
         labels.append(label)
 
     for i in labels: 
-
         bbox.append([i['bndbox']['ymin'],i['bndbox']['ymax'],i['bndbox']['xmin'],i['bndbox']['xmax']])
 
     for i in range(len(bbox)):
         bbox[i]=list(map(int,bbox[i]))
-    
     
     mask=np.zeros((img.shape[0],img.shape[1]),dtype='uint8')
     for i in bbox:
@@ -230,11 +229,9 @@ def make_mixed_image(img, mask, img2):
     # 복원된 합성 이미지 반환
     return recon_img
 
-def method1(pair,is_segmented=True):
+def method1(dataset_path, pair, is_segmented=True):
     
-    path=path=os.getcwd()
-    data1, data2 = read_data(path=path, pair=pair,is_segmented=is_segmented)
-    
+    data1, data2 = read_data(dataset_path, pair=pair,is_segmented=is_segmented)
 
     img1 = np.array(Image.open(data1[0][0]))
     img2 = np.array(Image.open(data2[0][0]))
@@ -259,10 +256,10 @@ def method1(pair,is_segmented=True):
     save_numpy_image(f'test.png', mixed_img)
     #return mixed_img
         
-def method2():
-    path = os.getcwd() + '/data/VOC2012'
+def method2(dataset_path):
+
     img_info, pair = get_pair()
-    data1, data2 = read_data(path=path, pair=pair, img_info=img_info)
+    data1, data2 = read_data(dataset_path, pair=pair, img_info=img_info)
         
     for i in tqdm(range(len(pair))):
         img1 = np.array(Image.open(data1[i][0]))
@@ -274,20 +271,27 @@ def method2():
         class2 = data2[i][2]
             
         mixed_img = make_mixed_image(img1, mask1, img2)
-        save_numpy_image(f'data/method2/{class1}_{class2}.png', mixed_img)
+        # save_numpy_image(f'data/method2/{class1}_{class2}.png', mixed_img)
         
 if __name__ ==  "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset-path", default="./VOCdevkit/VOC2012", type=str, help="get dataset path")
+    args = parser.parse_args()
+
     initialize_dict()
     # segmented or non segmented data
     is_segmented=True
 
-    co_occur = get_comatrix(path, segmented=is_segmented)
+    co_occur = get_comatrix(args.dataset_path, segmented=is_segmented)
+    print(co_occur)
     unrel_pairs = get_unrel_pairs(co_occur)
+    print(f"number of unrelated pairs: {len(unrel_pairs)}")
 
     # 배경, 인스턴스 pair : [label_idx, filename] list . ex) [[(0, 2007_000032), (1, 2007_000033)], ... ]
     bg_target_pairs = get_bg_target(unrel_pairs)
 
     for i in bg_target_pairs:
-        method1(i,is_segmented) # 찾은 pair , segment 여부 input
+        method1(dataset_path=args.dataset_path, pair=i, is_segmented=is_segmented) # 찾은 pair , segment 여부 input
 
     # method2()
