@@ -67,7 +67,7 @@ def main(args, download_data=False):
             ])
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.9)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
-    criterion = nn.BCEWithLogitsLoss(reduction='sum')
+    criterion = nn.CrossEntropyLoss()
 
     train(args, model, optimizer, scheduler, criterion, train_loader, valid_loader, save_dir=args.save_dir)
 
