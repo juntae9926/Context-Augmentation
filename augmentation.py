@@ -8,9 +8,6 @@ from PIL import Image
 from tqdm.notebook import tqdm
 import xmltodict
 import argparse
-# import matplotlib.pyplot as plt
-# import xml.etree.ElementTree as ET
-# import seaborn as sns
 
 
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
@@ -18,44 +15,6 @@ labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat',
           'train', 'tvmonitor']
 label_img = {}
 
-# def get_pair():
-#     classes = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
-#     'bus', 'car', 'cat', 'chair', 'cow',
-#     'diningtable', 'dog', 'horse', 'motorbike', 'person',
-#     'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
-#     classes = sorted(classes)
-#     img_info = {}
-#     for c in classes:
-#         img_info[c] = []
-#
-#     rootpath = os.getcwd()
-#     filepath = rootpath + '/data/VOC2012/Annotations'
-#     filelist = os.listdir(filepath)
-#     for xmlfile in tqdm(filelist):
-#         tree = ET.parse(filepath+'/'+xmlfile)
-#         root = tree.getroot()
-#         filename = [x.findtext('filename') for x in [root]]
-#         segmented = [x.findtext('segmented') for x in [root]]
-#         obj = root.findall('object')
-#         classname = sorted(list(set([x.findtext('name') for x in obj])))
-#         if segmented[0]=='1':
-#             for c in classname:
-#                 img_info[c].append(filename[0])
-#
-#     cooccur = [[_ for _ in range(len(classes))] for _ in range(len(classes))]
-#     for i, (key1, value1) in tqdm(enumerate(img_info.items())):
-#         for j, (key2, value2) in enumerate(img_info.items()):
-#             tmp = len([x for x in value1 if x in value2])
-#             cooccur[i][j] = tmp
-#
-#     zeropair = []
-#     for x in range(len(classes)):
-#         for y in range(x, len(classes)):
-#             if cooccur[x][y]==0:
-#                 zeropair.append([classes[x],classes[y]])
-#
-#     return img_info, zeropair
-#
 
 # read files and return co-occurence matrix
 def get_comatrix(dataset_path, segmented=False):
@@ -79,7 +38,6 @@ def get_comatrix(dataset_path, segmented=False):
     return co_matrix
 
 
-
 def initialize_dict():
     for label in labels:
         label_img.setdefault(label, [])
@@ -95,6 +53,7 @@ def get_bg_target(unrel_list):
         pairs.append([(unrel_pair[0], bg), (unrel_pair[1], t)])
     return pairs
 
+
 def get_unrel_pairs(mat):
     '''
     :param mat: [[178, 0, 0, 1, ...],
@@ -109,22 +68,6 @@ def get_unrel_pairs(mat):
         ret.append([zero_occur[0][i], zero_occur[1][i]])
     return ret
 
-
-
-
-"""
-# 데이터 읽기
-def Read_Data(path, is_train = True):
-    temp = []
-    updated_path = os.path.join(path, "ImageSets", "Segmentation", "train.txt" if is_train else "val.txt")
-    with open(updated_path, "r") as file_:
-        instances = file_.read().split()
-        for img in instances:
-            path_img = os.path.join(path, "JPEGImages", img + ".jpg")
-            path_label = os.path.join(path, "SegmentationClass", img + ".png")
-            temp.append([path_img, path_label])
-    return temp
-"""
 
 # 데이터 읽기
 def read_data(dataset_path ,pair ,is_segmented=True):
@@ -151,6 +94,7 @@ def read_data(dataset_path ,pair ,is_segmented=True):
         
     return temp1, temp2
 
+
 def save_numpy_image(file_name, img):
     img = Image.fromarray(img)
     img.save(file_name, 'png')
@@ -165,7 +109,9 @@ def make_instance(mask, img, label):
             img[i][j]=img[i][j]*mask[i][j] # rgb에 대한 mask 적용
 
     return img # mask로 추출된 instance image 추출( 원하는 부분만 원래 값을 사용하고, 나머지는 0인 이미지 )
-#methode 1d에 사용되는 함수
+
+
+# methode 1에 사용되는 함수
 def make_mask(img,label,instance_label):
     bbox=[]
     labels=[]
@@ -187,6 +133,7 @@ def make_mask(img,label,instance_label):
         mask[i[0]:i[1],i[2]:i[3]]=np.full([x_size,y_size],instance_label)
         
     return mask
+
 
 def make_mixed_image(img, mask, img2):
     y_axis = mask.shape[0]//2 # 4분면을 위한 중심 축 y
@@ -229,8 +176,8 @@ def make_mixed_image(img, mask, img2):
     # 복원된 합성 이미지 반환
     return recon_img
 
+
 def method1(dataset_path, pair, is_segmented=True):
-    
     data1, data2 = read_data(dataset_path, pair=pair,is_segmented=is_segmented)
 
     img1 = np.array(Image.open(data1[0][0]))
@@ -254,27 +201,31 @@ def method1(dataset_path, pair, is_segmented=True):
     instance_img=make_instance(mask1,img1,label1)
     mixed_img = make_mixed_image(img2, mask2, instance_img)
     save_numpy_image(f'test.png', mixed_img)
-    #return mixed_img
+
         
 def method2(dataset_path):
-
-    img_info, pair = get_pair()
-    data1, data2 = read_data(dataset_path, pair=pair, img_info=img_info)
+    path = os.getcwd()
+    data1, data2 = read_data(dataset_path, pair=pair, is_segmented=is_segmented)
         
-    for i in tqdm(range(len(pair))):
-        img1 = np.array(Image.open(data1[i][0]))
-        mask1 = np.array(Image.open(data1[i][1]))
-        class1 = data1[i][2]
-        
-        img2 = np.array(Image.open(data2[i][0]))
-        mask2 = np.array(Image.open(data2[i][1]))
-        class2 = data2[i][2]
-            
+    img1 = np.array(Image.open(data1[0][0]))
+    img2 = np.array(Image.open(data2[0][0]))
+    
+    label1 = pair[0][0]
+    label2 = pair[1][0]
+    
+    if is_segmented:
+        mask1 = np.array(Image.open(data1[0][2]))
         mixed_img = make_mixed_image(img1, mask1, img2)
-        # save_numpy_image(f'data/method2/{class1}_{class2}.png', mixed_img)
+        save_numpy_image(f'segmented_method2.png', mixed_img)
+    else:
+        with open(data1[0][1], 'r') as reader:
+            annotation1 = xmltodict.parse(reader.read())
+        mask1 = make_mask(img1, annotation1['annotation']['object'], label1) 
+        mixed_img = make_mixed_image(img1, mask1, img2)
+        save_numpy_image(f'bbox_method2.png', mixed_img)
+
         
 if __name__ ==  "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-path", default="./VOCdevkit/VOC2012", type=str, help="get dataset path")
     args = parser.parse_args()
@@ -293,5 +244,4 @@ if __name__ ==  "__main__":
 
     for i in bg_target_pairs:
         method1(dataset_path=args.dataset_path, pair=i, is_segmented=is_segmented) # 찾은 pair , segment 여부 input
-
-    # method2()
+        method2(dataset_path=args.dataset_path, pair=i, is_segmented=is_segmented)
