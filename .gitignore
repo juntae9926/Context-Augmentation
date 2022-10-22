@@ -136,3 +136,4 @@ runs/
 data/
 result/
 .idea
+wandb/
