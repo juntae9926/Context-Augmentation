@@ -29,9 +29,11 @@ class PascalVOC_Dataset(voc.VOCDetection):
         self.label_img, _ = self.initialize_dict()
 
         self.unrel_pairs = self.get_unrel_pairs()
-        self.segments_buffer = self.get_segments()
+        self.segments_buffer = self.get_stitch_segments()
+        self.bboxes_buffer = self.get_stitch_bboxes()
 
-        _, self.num_dict = self.initialize_dict()
+        _, self.segments_num_dict = self.initialize_dict()
+        _, self.bboxes_num_dict = self.initialize_dict()
 
     
     def __getitem__(self, index):
@@ -40,18 +42,21 @@ class PascalVOC_Dataset(voc.VOCDetection):
         target = self.parse_voc_xml(elemTree.parse(self.annotations[index]).getroot())
 
         _, test_target = self.transforms(img, target)
+        is_segmented = False if target['annotation']['segmented'] == str(0) else True
 
         target_list = list(np.where(test_target == 1)[0])
         if len(target_list) > 1:
             for pair in list(combinations(target_list, 2)): 
-                pair = (18, 19)
                 if list(pair) in self.unrel_pairs:
-                    img, target = self.method1(pair, img, target, index)
+                    img = self.method1(pair, img, target, index, is_segmented)
 
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 
         return img, target
+    
+    def collate_fn(batch):
+        return batch
         
     
     def __len__(self):
@@ -122,7 +127,7 @@ class PascalVOC_Dataset(voc.VOCDetection):
         return unrel_pairs
 
 
-    def get_segments(self, num_instances=5):
+    def get_stitch_segments(self, num_instances=5):
         segments = dict()
         for label in range(len(labels)):
             bg = [self.label_img[str(label)][i].split('.')[0] for i in range(num_instances)]
@@ -136,35 +141,114 @@ class PascalVOC_Dataset(voc.VOCDetection):
         
         return segments
     
+    def get_stitch_bboxes(self, num_instances=5):
+        bboxes = dict()
+        for label in range(len(labels)):
+            bg = [self.label_img[str(label)][i].split('.')[0] for i in range(num_instances)]
 
-    def method1(self, pair, img, target, index):
-        filename = self.images[index].split('/')[-1].split('.')[0]
+            temp = []
+            for file_name in bg:
+                with open(os.path.join(self.root, "Annotations", file_name + ".xml")) as fd:
+                    annotations = xmltodict.parse(fd.read())['annotation']['object']
+
+                    img = np.array(Image.open(os.path.join(self.root, "JPEGImages",  file_name + ".jpg")))
+
+                    if type(annotations) == list:
+                        for i in annotations:
+                            if labels.index(i['name']) == label:
+                                y1, y2, x1, x2 = int(i['bndbox']['ymin']), int(i['bndbox']['ymax']), int(i['bndbox']['xmin']), int(i['bndbox']['xmax'])
+                    else:
+                        i = annotations
+                        if labels.index(i['name']) == label:
+                            y1, y2, x1, x2 = int(i['bndbox']['ymin']), int(i['bndbox']['ymax']), int(i['bndbox']['xmin']), int(i['bndbox']['xmax'])
+                    mask = img[y1:y2, x1:x2, :]
+                    temp.append(mask)
+            
+            bboxes[str(label)] = temp
+        
+        return bboxes
+
+    def _make_mask(self, img, file_name, instance_label):
+        with open(os.path.join(self.root, "Annotations", file_name + ".xml")) as fd:
+            label = xmltodict.parse(fd.read())['annotation']['object']
+        bbox=[]
+        labels=[]
+
+        if isinstance(label,list):
+            labels=label[:]
+        else:
+            labels.append(label)
+
+        for i in labels:
+            bbox.append([i['bndbox']['ymin'],i['bndbox']['ymax'],i['bndbox']['xmin'],i['bndbox']['xmax']])
+
+        for i in range(len(bbox)):
+            bbox[i]=list(map(int,bbox[i]))
+        
+        mask=np.zeros((img.shape[0],img.shape[1]),dtype='uint8')
+        for i in bbox:
+            x_size,y_size=mask[i[0]:i[1],i[2]:i[3]].shape
+
+            mask[i[0]:i[1],i[2]:i[3]]=np.full([x_size,y_size], instance_label)
+            
+        return mask
+
+    def _make_mixed_image(self, img, mask, img2):
+        y_axis = mask.shape[0]//2 # 4분면을 위한 중심 축 y
+        x_axis = mask.shape[1]//2 # 4분면을 위한 중심 축 x
+        quad_area = np.zeros(4) # 각 4분면의 instance가 차지하는 영역을 저장하기 위한 array
+        quad_img = [] # 각 4분면의 이미지를 저장
+        
+        # 4분면 슬라이싱을 위한 인덱스 저장
+        quad_idx=[((0, y_axis),(x_axis, mask.shape[1])),
+                ((0, y_axis),(0,x_axis)),
+                ((y_axis, mask.shape[0]),(0, x_axis)),
+                ((y_axis, mask.shape[0]),(x_axis, mask.shape[1]))]
+        
+        # instance가 있는 부분을 1로 바꾼 임시 리스트
+        temp = np.where(mask[:,:]!=0, 1, mask[:, :])
+        
+        # 임시 리스트의 값을 합산하여 각 4분면의 instance가 차지하는 면적 구하기
+        for i in range(4):
+            quad_area[i] = np.sum(temp[quad_idx[i][0][0]:quad_idx[i][0][1],quad_idx[i][1][0]:quad_idx[i][1][1]])
+            # 4분면 이미지 저장
+            quad_img.append(img[quad_idx[i][0][0]:quad_idx[i][0][1],quad_idx[i][1][0]:quad_idx[i][1][1],:])
+            
+        # 가장 적은 면적 차지하는 4분면 선택
+        selected_quad = np.argmin(quad_area)
+        
+        # 선택된 4분면에 따른 resize 크기 추출
+        resize_y, resize_x, _ = quad_img[selected_quad].shape
+        
+        # resize 크기에 따른 img resize
+        resize_patch = np.array(Image.fromarray(img2).resize((resize_x, resize_y)))
+        
+        # resize한 image를 선택된 4분면 이미지에 합성
+        quad_img[selected_quad] = np.where(resize_patch[:,:,:]!=0, resize_patch[:,:,:], quad_img[selected_quad][:,:,:])
+        
+        # 이미지 복원
+        temp_img_1 = np.concatenate((quad_img[1], quad_img[0]), axis = 1)
+        temp_img_2 = np.concatenate((quad_img[2], quad_img[3]), axis = 1)
+        recon_img = np.concatenate((temp_img_1, temp_img_2), axis = 0)
+        
+        # 복원된 합성 이미지 반환
+        return recon_img
+
+    
+    def method1(self, pair, img, target, index, is_segmented):
+        file_name = self.images[index].split('/')[-1].split('.')[0]
         bg_img = np.array(img)
-        # try: 
-        #     bg_img_mask = np.array(Image.open(os.path.join('./', self.root, "SegmentationClass", filename + ".png")))
+        if is_segmented: 
+            bg_img_mask = np.array(Image.open(os.path.join('./', self.root, "SegmentationClass", file_name + ".png")))
+            segment = self.segments_buffer[str(pair[1])][self.segments_num_dict[str(pair[1])]] # Img: np.array
+            self.segments_num_dict[str(pair[1])] += 1
+            mixed_img = self._make_mixed_image(bg_img, bg_img_mask, segment)
+        else:
+            bg_img_mask = self._make_mask(bg_img, file_name, pair[0]+1)
+            bbox = self.bboxes_buffer[str(pair[1])][self.bboxes_num_dict[str(pair[1])]] # Img: np.array
+            self.bboxes_num_dict[str(pair[1])] += 1
+            mixed_img = self._make_mixed_image(bg_img, bg_img_mask, bbox)
 
-        #     segment = self.segments_buffer[str(pair[1])][self.num_dict[str(pair[1])]] # Img: np.array
-        #     self.num_dict[str(pair[1])] += 1 
+        Image.fromarray(mixed_img).save("aaaaaaaaaaaa.png")
 
-        #     y_axis = bg_img_mask.shape[0]//2 # 4분면을 위한 중심 축 y
-        #     x_axis = bg_img_mask.shape[1]//2 # 4분면을 위한 중심 축 x
-        #     quad_area = np.zeros(4) # 각 4분면의 instance가 차지하는 영역을 저장하기 위한 array
-        #     quad_img = [] # 각 4분면의 이미지를 저장
-            
-        #     # 4분면 슬라이싱을 위한 인덱스 저장
-        #     quad_idx=[((0, y_axis),(x_axis, bg_img_mask.shape[1])),
-        #             ((0, y_axis),(0,x_axis)),
-        #             ((y_axis, bg_img_mask.shape[0]),(0, x_axis)),
-        #             ((y_axis, bg_img_mask.shape[0]),(x_axis, bg_img_mask.shape[1]))]
-            
-        #     # instance가 있는 부분을 1로 바꾼 임시 리스트
-        #     temp = np.where(bg_img_mask[:,:]!=0, 1, bg_img_mask[:, :])
-
-        #     for i in range(4):
-        #         quad_area[i] = np.sum(temp[quad_idx[i][0][0]:quad_idx[i][0][1],quad_idx[i][1][0]:quad_idx[i][1][1]])
-        #         # 4분면 이미지 저장
-        #         quad_img.append(img[quad_idx[i][0][0]:quad_idx[i][0][1],quad_idx[i][1][0]:quad_idx[i][1][1],:])
-
-        # except:
-        #     self.annotations
-        return img, target
+        return Image.fromarray(mixed_img)
