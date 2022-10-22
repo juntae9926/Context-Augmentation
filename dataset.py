@@ -7,6 +7,7 @@ import numpy as np
 from itertools import permutations, combinations
 
 from augmentation import *
+import pdb
 
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
@@ -34,6 +35,7 @@ class PascalVOC_Dataset(voc.VOCDetection):
 
         _, self.segments_num_dict = self.initialize_dict()
         _, self.bboxes_num_dict = self.initialize_dict()
+        _, self.method2_num_dict = self.initialize_dict()
 
     
     def __getitem__(self, index):
@@ -41,20 +43,28 @@ class PascalVOC_Dataset(voc.VOCDetection):
         img = Image.open(self.images[index]).convert("RGB")
         target = self.parse_voc_xml(elemTree.parse(self.annotations[index]).getroot())
 
+        # try method1 on image
         _, test_target = self.transforms(img, target)
         is_segmented = False if target['annotation']['segmented'] == str(0) else True
-
         target_list = list(np.where(test_target == 1)[0])
-        if len(target_list) > 1:
-            for pair in list(combinations(target_list, 2)): 
-                if list(pair) in self.unrel_pairs:
-                    img = self.method1(pair, img, target, index, is_segmented)
+        current_single_label = random.choice(target_list)
+        try:
+            aug_label = random.choice(np.where(self.unrel_pairs[current_single_label] == 1)[0])
+            pair = [current_single_label, aug_label]
+            img = self.method1(pair, img, index, is_segmented)
+        except:
+            pair = None
 
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 
+        # try method1 on label
+        if pair:
+            target[aug_label] = 1
+    
         return img, target
     
+
     def collate_fn(batch):
         return batch
         
@@ -122,9 +132,13 @@ class PascalVOC_Dataset(voc.VOCDetection):
         for i in range(20):
             for j in range(i, 20):
                 if co_matrix[i][j] == 0:
-                    unrel_pairs.append([i, j])
+                    unrel_pairs.append((i, j))
 
-        return unrel_pairs
+        numpy_unrel_pairs = np.zeros((20, 20), dtype=int)
+        for i, j in unrel_pairs:
+            numpy_unrel_pairs[i, j] = 1
+
+        return numpy_unrel_pairs
 
 
     def get_stitch_segments(self, num_instances=5):
@@ -235,7 +249,7 @@ class PascalVOC_Dataset(voc.VOCDetection):
         return recon_img
 
     
-    def method1(self, pair, img, target, index, is_segmented):
+    def method1(self, pair, img, index, is_segmented):
         file_name = self.images[index].split('/')[-1].split('.')[0]
         bg_img = np.array(img)
         if is_segmented: 
@@ -249,6 +263,24 @@ class PascalVOC_Dataset(voc.VOCDetection):
             self.bboxes_num_dict[str(pair[1])] += 1
             mixed_img = self._make_mixed_image(bg_img, bg_img_mask, bbox)
 
-        Image.fromarray(mixed_img).save("aaaaaaaaaaaa.png")
-
         return Image.fromarray(mixed_img)
+
+
+    def method2(self, pair, img, index, is_segmented):
+        file_name = self.images[index].split('/')[-1].split('.')[0]
+        bg_img = np.array(img)
+
+        # if is_segmented: 
+        #     bg_img_mask = np.array(Image.open(os.path.join('./', self.root, "SegmentationClass", file_name + ".png")))
+        #     segment = self.segments_buffer[str(pair[1])][self.segments_num_dict[str(pair[1])]] # Img: np.array
+        #     mixed_img = self._make_mixed_image(bg_img, bg_img_mask, segment)
+        # else:
+        #     bg_img_mask = self._make_mask(bg_img, file_name, pair[0]+1)
+        #     bbox = self.bboxes_buffer[str(pair[1])][self.bboxes_num_dict[str(pair[1])]] # Img: np.array
+        #     mixed_img = self._make_mixed_image(bg_img, bg_img_mask, bbox)
+
+        # self.method2_num_dict += 1
+
+        # return Image.fromarray(mixed_img)
+
+
