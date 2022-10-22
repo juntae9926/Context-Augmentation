@@ -10,8 +10,12 @@ import argparse
 
 import models
 from dataset import PascalVOC_Dataset
+import wandb
 
 from utils import *
+
+import warnings
+warnings.filterwarnings(action='ignore')
 
 def main(args, download_data=False):
     epochs = args.epochs
@@ -51,7 +55,7 @@ def main(args, download_data=False):
                                       transform=data_transform['valid'], 
                                       target_transform=encode_labels)
 
-    train_loader = DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers) 
+    train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers) 
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     # Model
@@ -100,7 +104,14 @@ def train(args, model, optimizer, scheduler, criterion, train_loader, valid_load
                     batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
 
                     running_loss += loss
-                    running_ap += get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
+                    ap = get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
+                    running_ap += ap
+                    lr = scheduler.get_lr()[0]
+
+                    if args.wandb == True:
+                        wandb.log({"Train loss": loss})
+                        wandb.log({"learning rate": lr})
+                        wandb.log({"ap": ap})
 
                     loss.backward()
                     optimizer.step()
@@ -136,8 +147,15 @@ def train(args, model, optimizer, scheduler, criterion, train_loader, valid_load
                         batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size))
 
                         running_loss += loss
-                        running_ap += get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
-                        
+                        running_ap += ap
+                        ap = get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
+                        lr = scheduler.get_lr()[0]
+
+                        if args.wandb == True:
+                            wandb.log({"Valid loss": loss})
+                            wandb.log({"learning rate": lr})
+                            wandb.log({"ap": ap})
+
                         del x, y, output
                         torch.cuda.empty_cache()
 
@@ -166,9 +184,18 @@ if __name__ == "__main__":
     parser.add_argument("--project-name", default="test", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=16, type=int, help="Batch size")
-    parser.add_argument("--epochs", default=100, type=int, help="Total epochs")
+    parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
     parser.add_argument("--lr", default=[1.5e-4, 5e-2], type=float, help="Learning rate")
     parser.add_argument("--num-workers", default=8, type=int)
+    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb-entity", default="juntae9926", type=str)
+    args = parser.parse_args()
+
+    if args.wandb == True:    
+        project_name = "context"
+        wandb.init(project=project_name, entity=args.wandb_entity)
+        wandb.config.update(args)
+        print(f"Start with wandb with {project_name}")
 
 
     args = parser.parse_args()
