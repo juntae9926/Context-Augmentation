@@ -7,15 +7,25 @@ import numpy as np
 from itertools import permutations, combinations
 
 from augmentation import *
-import pdb
 
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
           'train', 'tvmonitor']
 
-# Segmentation ONLY
+
+class PascalVOC:
+    def __init__(self, root):
+        self.root_dir = root
+        self.img_dir =  os.path.join(root, 'JPEGImages/')
+        self.ann_dir = os.path.join(root, 'Annotations')
+        self.set_dir = os.path.join(root, 'ImageSets', 'Main')
+        self.cache_dir = os.path.join(root, 'csvs')
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+
+
 class PascalVOC_Dataset(voc.VOCDetection):
-    def __init__(self, root, year='2012', image_set='train', download=False, transform=None, target_transform=None):
+    def __init__(self, root, year='2012', image_set='train', download=False, transform=None, target_transform=None, use_method1 = False):
         
         super().__init__(
              root="./", 
@@ -25,9 +35,10 @@ class PascalVOC_Dataset(voc.VOCDetection):
              transform=transform, 
              target_transform=target_transform)
         
-        # self.dataset_path = dataset_path
-        self.root = root
+        self.root = os.path.join(root, "VOC" + year)
+        print(self.root)
         self.label_img, _ = self.initialize_dict()
+        self.use_method1 = use_method1
 
         self.unrel_pairs = self.get_unrel_pairs()
         self.segments_buffer = self.get_stitch_segments()
@@ -44,22 +55,23 @@ class PascalVOC_Dataset(voc.VOCDetection):
         target = self.parse_voc_xml(elemTree.parse(self.annotations[index]).getroot())
 
         # try method1 on image
-        _, test_target = self.transforms(img, target)
-        is_segmented = False if target['annotation']['segmented'] == str(0) else True
-        target_list = list(np.where(test_target == 1)[0])
-        current_single_label = random.choice(target_list)
-        try:
-            aug_label = random.choice(np.where(self.unrel_pairs[current_single_label] == 1)[0])
-            pair = [current_single_label, aug_label]
-            img = self.method1(pair, img, index, is_segmented)
-        except:
-            pair = None
+        if self.use_method1:
+            _, test_target = self.transforms(img, target)
+            is_segmented = False if target['annotation']['segmented'] == str(0) else True
+            target_list = list(np.where(test_target == 1)[0])
+            current_single_label = random.choice(target_list)
+            try:
+                aug_label = random.choice(np.where(self.unrel_pairs[current_single_label] == 1)[0])
+                pair = [current_single_label, aug_label]
+                img = self.method1(pair, img, index, is_segmented)
+            except:
+                pair = None
 
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 
         # try method1 on label
-        if pair:
+        if self.use_method1 and pair:
             target[aug_label] = 1
     
         return img, target
@@ -282,5 +294,3 @@ class PascalVOC_Dataset(voc.VOCDetection):
         # self.method2_num_dict += 1
 
         # return Image.fromarray(mixed_img)
-
-
