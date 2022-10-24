@@ -27,3 +27,15 @@ Sogang Univ. Grad. Big-data project repository
 ## augmentation.py
 - Pascal VOC 2012에서 co-occurance가 0인 category pair에서 랜덤으로 이미지를 선택해서 1장씩 augmentation하는 로직까지 완성
 - patch 단위로 붙히는 method 2 완성
+
+## Dataset Overview
+- To train a CNN model, we use VOC2012 trainval dataset
+- To test a CNN model, we use VOC2007 test dataset
+
+## Model Settig
+- We leverage Resnet-18, Resnet-50, Resnet-101 to test our augmentation method.
+- Two major options for model, which are from scratch and from pre-trained weights on ImageNet.
+- To measure our augmentation method properly, It needs to be measured by class-by-class mAP.
+
+## Example of mAPs
+
