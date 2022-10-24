@@ -2,29 +2,36 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+import torchvision.models as models
+from sklearn.metrics import average_precision_score
 
 import os
 import numpy as np
 from tqdm import tqdm
 import argparse
 
-import models
 from dataset import PascalVOC_Dataset
 import wandb
 
+from math import ceil
 from utils import *
 
 import warnings
 warnings.filterwarnings(action='ignore')
 
-def main(args, download_data=False):
-    epochs = args.epochs
+def compute_mAP(labels,outputs):
+    y_true = labels.cpu().numpy()
+    y_pred = outputs.cpu().numpy()
+    AP = []
+    for i in range(y_true.shape[0]):
+        AP.append(average_precision_score(y_true[i],y_pred[i]))
 
-    # ImageNet Values
+    return np.mean(AP)
+
+
+def set_transforms():
     mean=[0.457342265910642, 0.4387686270106377, 0.4073427106250871]
     std=[0.26753769276329037, 0.2638145880487105, 0.2776826934044154]
-
-    """ APPLYing Our Augmentation Method should be here """
 
     data_transform = {
         'train': transforms.Compose([
@@ -41,154 +48,181 @@ def main(args, download_data=False):
         ]),
     }
 
+    return data_transform
+
+
+def load_model(num_classes):
+    model = models.resnet18(pretrained=False)
+    in_ftrs = model.fc.in_features
+    model.fc = nn.Linear(in_ftrs, num_classes)
+
+    return model
+
+
+def train(args, model, optimizer, scheduler, criterion, train_loader):
+    """
+    Train a neural network with Resnet models
+
+    Args:
+        args: Argumentparser object
+        model: loaded weights
+        optimizer: optimizer object 
+        scheduler: scheduler object that wraps the optimizer
+        criterion: loss function of multi-label classification
+        train_loader: make batches of training dataset
+        valid_loader: make batches of validation dataset
+        save_dir: Location of saving weights
+    
+    Returns:
+        train and valid history [loss, map]
+    """
+
+    model.train()
+    total_loss = 0
+    mAP = []
+    batch_bar = tqdm(total=len(train_loader), dynamic_ncols=True, leave=False, position=0, desc='Train')
+
+    for x, y in train_loader:
+        x, y = x.to(args.device), y.to(args.device)
+
+        optimizer.zero_grad()
+        pred = model(x)
+        loss = criterion(pred, y)
+
+        total_loss += loss
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        running_map = compute_mAP(y.data, pred.data)
+        mAP.append(running_map)
+
+        batch_bar.set_postfix(loss="{:.04f}".format(loss.item()), mAP="{:.04f}".format(running_map), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
+
+        del x, y, pred
+        torch.cuda.empty_cache()
+
+        batch_bar.update()
+    batch_bar.close()
+
+    epoch_loss = total_loss / ceil(len(train_loader.dataset)/train_loader.batch_size)
+    mAP_mean = sum(mAP) / len(mAP)
+
+    if args.wandb:
+        wandb.log({"Train loss": epoch_loss})
+        wandb.log({"Train mAP": mAP_mean})
+        wandb.log({"learning rate": optimizer.param_groups[0]['lr']})
+
+    return epoch_loss, mAP_mean
+
+
+def valid(args, model, criterion, valid_loader):
+    
+    model.eval()
+    total_loss = 0
+    mAP = []
+   
+    with torch.no_grad():
+        batch_bar = tqdm(total=len(valid_loader), dynamic_ncols=True, leave=False, position=0, desc='Valid')
+        for x, y in valid_loader:
+            x, y = x.to(args.device), y.to(args.device)
+            
+            pred = model(x)
+            loss = criterion(pred, y)
+            total_loss += loss
+
+            running_map = compute_mAP(y.data, pred.data)
+            mAP.append(running_map)
+
+            batch_bar.set_postfix(loss="{:.04f}".format(loss.item()), mAP="{:.04f}".format(running_map))
+
+            del x, y, pred
+            torch.cuda.empty_cache()
+
+            batch_bar.update()
+        batch_bar.close()
+
+        epoch_loss = total_loss / ceil(len(valid_loader.dataset)/valid_loader.batch_size)
+        mAP_mean = sum(mAP) / len(mAP)
+    
+    if args.wandb:
+        wandb.log({"Valid loss": epoch_loss})
+        wandb.log({"Valid mAP": mAP_mean})
+    
+    return  epoch_loss, mAP_mean
+
+
+def main(args, download_data=False):
+
+    data_transform = set_transforms()
+
     dataset_train = PascalVOC_Dataset(args.data_dir,
                                       year='2012', 
-                                      image_set='train', 
+                                      image_set='trainval', 
                                       download=download_data, 
                                       transform=data_transform['train'], 
-                                      target_transform=encode_labels)
+                                      target_transform=encode_labels,
+                                      use_method1 = args.method1)
     
-    dataset_valid = PascalVOC_Dataset(args.data_dir,
-                                      year='2012', 
-                                      image_set='val', 
-                                      download=download_data, 
-                                      transform=data_transform['valid'], 
-                                      target_transform=encode_labels)
+    dataset_valid = PascalVOC_Dataset(root=args.data_dir,
+                                      year='2007',
+                                      image_set='test',
+                                      download=download_data,
+                                      transform=data_transform['valid'],
+                                      target_transform=encode_labels,
+                                      use_method1 = args.method1)
 
-    train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers) 
+    train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     # Model
-    model = models.resnet50(pretrained=False)
+    model = load_model(num_classes=20)
     model = model.to(args.device)
-    print(model)
 
     # Optimizer & Scheduler & Criterion
-    # optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    optimizer = torch.optim.SGD([   
-            {'params': list(model.parameters())[:-1], 'lr': args.lr[0], 'momentum': 0.9},
-            {'params': list(model.parameters())[-1], 'lr': args.lr[1], 'momentum': 0.9}
-            ])
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.9)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
-    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                                lr=args.lr,momentum=0.99,weight_decay = 0.0001)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
+    # criterion = nn.BCEWithLogitsLoss(reduction='sum')
+    criterion = nn.MultiLabelSoftMarginLoss()
 
-    train(args, model, optimizer, scheduler, criterion, train_loader, valid_loader, save_dir=args.save_dir)
-
-def train(args, model, optimizer, scheduler, criterion, train_loader, valid_loader, save_dir):
-
-    tr_loss, tr_map = [], []
-    val_loss, val_map = [], []
-    best_val_map = 0.0
-
+    best_map = 0
     for epoch in range(args.epochs):
         print("Epoch {}/{}".format((epoch+1), args.epochs))
-        scheduler.step()
+        train_loss, train_map = train(args, model, optimizer, scheduler, criterion, train_loader)
+        print("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f}".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+        valid_loss, valid_map = valid(args, model, criterion, valid_loader)
+        print("Valid Loss {:.04f}, mAP {:.4f}".format(valid_loss, valid_map))
 
-        for phase in ['train', 'valid']:
-            running_loss = 0.0
-            running_ap = 0.0
-            m = torch.nn.Sigmoid()
+        # Early stopping
+        if best_map != 0 and 0 < best_map-valid_map < 0.0002:
+            print(f"--- early stopped at epoch {epoch}")
+            break
 
-            if phase == 'train': 
-                model.train()
-                batch_bar = tqdm(total=len(train_loader), dynamic_ncols=True, leave=False, position=0, desc='Train')
-                for x, y in train_loader:
-                    x = x.float()
-                    x = x.to(args.device)
-                    y = y.to(args.device)
-
-                    optimizer.zero_grad()
-                    output = model(x)
-                    loss = criterion(output, y)
-                    batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
-
-                    running_loss += loss
-                    ap = get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
-                    running_ap += ap
-                    lr = scheduler.get_lr()[0]
-
-                    if args.wandb == True:
-                        wandb.log({"Train loss": loss})
-                        wandb.log({"learning rate": lr})
-                        wandb.log({"ap": ap})
-
-                    loss.backward()
-                    optimizer.step()
-                    
-                    del x, y, output
-                    torch.cuda.empty_cache()
-
-                    batch_bar.update()
-                batch_bar.close()
-
-                num_samples = float(len(train_loader.dataset))
-                tr_loss_ = running_loss.item()/num_samples
-                tr_map_ = running_ap/num_samples
-
-                print("Train Loss {:.04f}, Train avg precision: {:.3f}, Learning rate {:.06f}".format(
-                    tr_loss_, tr_map_, float(optimizer.param_groups[0]['lr'])))
-                
-                tr_loss.append(tr_loss_), tr_map.append(tr_map_)
-            
-            else:
-                model.eval()
-                batch_bar = tqdm(total=len(valid_loader), dynamic_ncols=True, leave=False, position=0, desc='Valid')
-                
-                with torch.no_grad():
-                    for x, y in valid_loader:
-                        x = x.float()
-                        x = x.to(args.device)
-                        y = y.to(args.device)
-
-                        optimizer.zero_grad()
-                        output = model(x)
-                        loss = criterion(output, y)
-                        batch_bar.set_postfix(loss="{:.04f}".format(loss.item()/args.batch_size))
-
-                        running_loss += loss
-                        running_ap += ap
-                        ap = get_ap_score(torch.Tensor.cpu(y).detach().numpy(), torch.Tensor.cpu(m(output)).detach().numpy()) 
-                        lr = scheduler.get_lr()[0]
-
-                        if args.wandb == True:
-                            wandb.log({"Valid loss": loss})
-                            wandb.log({"learning rate": lr})
-                            wandb.log({"ap": ap})
-
-                        del x, y, output
-                        torch.cuda.empty_cache()
-
-                        batch_bar.update()
-                    batch_bar.close()
-
-                    num_samples = float(len(valid_loader.dataset))
-                    val_loss_ = running_loss.item()/num_samples
-                    val_map_ = running_ap/num_samples
-
-                    val_loss.append(val_loss_), val_map.append(val_map_)
-                    print("Valid Loss {:.04f}, Valid avg precision: {:.3f}".format(val_loss_, val_map_))
-
-                    if val_map_ >= best_val_map:
-                        best_val_map = val_map_
-                        if not os.path.isdir(os.path.join(args.save_dir)):
-                            os.mkdir(args.save_dir)
-                        torch.save(model.state_dict(), os.path.join(args.save_dir, "model-{}.pth".format(epoch)))
-                        torch.save(model.state_dict(), os.path.join(args.save_dir, "model-best.pth"))
-                        print("--- best model saved at {} ---".format(args.save_dir))
+        # save best weight
+        if valid_map > best_map:
+            best_map = valid_map
+            if not os.path.isdir(os.path.join(args.save_dir)):
+                os.mkdir(args.save_dir)
+            torch.save(model.state_dict(), os.path.join(args.save_dir, "model-{}.pth".format(epoch)))
+            torch.save(model.state_dict(), os.path.join(args.save_dir, "model-best.pth"))
+            print("--- best model saved at {} ---".format(args.save_dir))
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="VOCdevkit/VOC2012", type=str)
+    parser.add_argument("--data-dir", default="VOCdevkit", type=str)
     parser.add_argument("--save-dir", default="runs", type=str)
-    parser.add_argument("--project-name", default="test", type=str)
+    parser.add_argument("--project-name", default="base", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
-    parser.add_argument("--batch-size", default=16, type=int, help="Batch size")
+    parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
     parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
-    parser.add_argument("--lr", default=[1.5e-4, 5e-2], type=float, help="Learning rate")
+    parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
     parser.add_argument("--num-workers", default=8, type=int)
     parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--wandb-entity", default="juntae9926", type=str)
+    parser.add_argument("--wandb-entity", default="", type=str)
+    parser.add_argument("--method1", action="store_true")
     args = parser.parse_args()
 
     if args.wandb == True:    
@@ -196,7 +230,6 @@ if __name__ == "__main__":
         wandb.init(project=project_name, entity=args.wandb_entity)
         wandb.config.update(args)
         print(f"Start with wandb with {project_name}")
-
 
     args = parser.parse_args()
     main(args)
