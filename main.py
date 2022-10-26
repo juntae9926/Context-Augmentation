@@ -15,6 +15,7 @@ import wandb
 
 from math import ceil
 from utils import *
+from schedulers import CosineAnnealingWarmUpRestarts
 
 import warnings
 warnings.filterwarnings(action='ignore')
@@ -97,6 +98,9 @@ def train(args, model, optimizer, scheduler, criterion, train_loader):
         running_map = compute_mAP(y.data, pred.data)
         mAP.append(running_map)
 
+        if args.wandb:
+            wandb.log({"learning rate": optimizer.param_groups[0]['lr']})
+
         batch_bar.set_postfix(loss="{:.04f}".format(loss.item()), mAP="{:.04f}".format(running_map), lr="{:.06f}".format(optimizer.param_groups[0]['lr']))
 
         del x, y, pred
@@ -111,7 +115,7 @@ def train(args, model, optimizer, scheduler, criterion, train_loader):
     if args.wandb:
         wandb.log({"Train loss": epoch_loss})
         wandb.log({"Train mAP": mAP_mean})
-        wandb.log({"learning rate": optimizer.param_groups[0]['lr']})
+        
 
     return epoch_loss, mAP_mean
 
@@ -154,10 +158,18 @@ def valid(args, model, criterion, valid_loader):
 
 def main(args, download_data=False):
 
+    if not os.path.isdir(args.save_dir):
+        save_dir = os.path.join(args.save_dir, 'test_0')
+        os.makedirs(save_dir)
+    else:
+        weight_dirs = os.listdir(args.save_dir)
+        save_dir = os.path.join(args.save_dir, "test_%d" % len(weight_dirs))
+        os.makedirs(save_dir)
+
     data_transform = set_transforms()
 
     dataset_train = PascalVOC_Dataset(args.data_dir,
-                                      year='2012', 
+                                      year='2012',
                                       image_set='trainval', 
                                       download=download_data, 
                                       transform=data_transform['train'], 
@@ -182,54 +194,82 @@ def main(args, download_data=False):
     # Optimizer & Scheduler & Criterion
     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                                 lr=args.lr,momentum=0.99,weight_decay = 0.0001)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
+    # optimizer = torch.optim.SGD([   
+    #         {'params': list(model.parameters())[:-1], 'lr': lr[0], 'momentum': 0.9},
+    #         {'params': list(model.parameters())[-1], 'lr': lr[1], 'momentum': 0.9}
+    #         ])
+    
+    if args.scheduler == "step":
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
-    # criterion = nn.BCEWithLogitsLoss(reduction='sum')
-    criterion = nn.MultiLabelSoftMarginLoss()
+    elif args.scheduler == "cosine":
+        scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=args.lr, gamma=0.7, last_epoch=-1)
+    
+    if args.criterion == "BCE":
+        criterion = nn.BCEWithLogitsLoss(reduction='sum')
+    elif args.criterion == "Soft":
+        criterion = nn.MultiLabelSoftMarginLoss()
+
+    log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
+    log_file.write(f"--- Experiment with method1 {args.method1} --- \n")
 
     best_map = 0
     for epoch in range(args.epochs):
         print("Epoch {}/{}".format((epoch+1), args.epochs))
+        log_file.write("Epoch {}/{} \n".format((epoch+1), args.epochs))
+
+        # Training
         train_loss, train_map = train(args, model, optimizer, scheduler, criterion, train_loader)
         print("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f}".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+        log_file.write("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f} \n".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+
+        # Validation
         valid_loss, valid_map = valid(args, model, criterion, valid_loader)
         print("Valid Loss {:.04f}, mAP {:.4f}".format(valid_loss, valid_map))
+        log_file.write("Valid Loss {:.04f}, mAP {:.4f} \n".format(valid_loss, valid_map))
+
 
         # Early stopping
         if best_map != 0 and 0 < best_map-valid_map < 0.0002:
-            print(f"--- early stopped at epoch {epoch}")
+            print(f"--- early stopped at epoch {epoch+1} ---")
             break
 
         # save best weight
         if valid_map > best_map:
             best_map = valid_map
-            if not os.path.isdir(os.path.join(args.save_dir)):
-                os.mkdir(args.save_dir)
-            torch.save(model.state_dict(), os.path.join(args.save_dir, "model-{}.pth".format(epoch)))
-            torch.save(model.state_dict(), os.path.join(args.save_dir, "model-best.pth"))
-            print("--- best model saved at {} ---".format(args.save_dir))
+            
+            torch.save(model.state_dict(), os.path.join(save_dir, "model-{}.pth".format(epoch+1)))
+            torch.save(model.state_dict(), os.path.join(save_dir, "model-best.pth"))
+            print("--- best model saved at {} ---".format(save_dir))
+
+            weight_files = os.listdir(save_dir).sort()
+            if weight_files and len(weight_files) > 10:
+                os.remove(os.path.join(args.save_dir, weight_files[0]))
     
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="VOCdevkit", type=str)
-    parser.add_argument("--save-dir", default="runs", type=str)
+    parser.add_argument("--save-dir", default="runs/no_method", type=str)
     parser.add_argument("--project-name", default="base", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
     parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
     parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
+    parser.add_argument("--scheduler", default="step", type=str, help="select scheduler")
+    parser.add_argument("--criterion", default="BCE", type=str, help="select scheduler")
     parser.add_argument("--num-workers", default=8, type=int)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-entity", default="", type=str)
     parser.add_argument("--method1", action="store_true")
     args = parser.parse_args()
+    print(args)
 
     if args.wandb == True:    
-        project_name = "context"
-        wandb.init(project=project_name, entity=args.wandb_entity)
+        wandb.init(project=args.project_name, entity=args.wandb_entity)
         wandb.config.update(args)
-        print(f"Start with wandb with {project_name}")
+        print(f"Start with wandb with {args.project_name}")
+    print(f"Start without wandb")
 
     args = parser.parse_args()
     main(args)
