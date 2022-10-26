@@ -37,5 +37,21 @@ Sogang Univ. Grad. Big-data project repository
 - Two major options for model, which are from scratch and from pre-trained weights on ImageNet.
 - To measure our augmentation method properly, It needs to be measured by class-by-class mAP.
 
-## Example of mAPs
+## How to Use
+- If you want to apply the original setting, just use train.sh as a script
+- For modifying other options, you can make a script as below.
+```
+python3 main.py --lr 0.001 \
+                --batch-size 64 \
+                --scheduler cosine \
+                --criterion BCE \
+                --device cuda:0 \
+                --method1 \
+                --project-name context \
+                --save-dir runs/method1
+```
 
+## ToDo
+- [ ] Apply minimum selection algorithm on datalaader [dataloader - method 1]
+- [ ] Visualize co-occurrence matrix every epoch [main - epoch]
+- [ ] Compare unrel_matrix and performances [evaluate heuristically]
