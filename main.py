@@ -201,9 +201,10 @@ def main(args, download_data=False):
     
     if args.scheduler == "step":
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
+
     elif args.scheduler == "cosine":
-        scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=args.lr, gamma=0.7, last_epoch=-1)
+        # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=0.001, gamma=0.7, last_epoch=-1)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
     
     if args.criterion == "BCE":
         criterion = nn.BCEWithLogitsLoss(reduction='sum')
@@ -268,8 +269,9 @@ if __name__ == "__main__":
     if args.wandb == True:    
         wandb.init(project=args.project_name, entity=args.wandb_entity)
         wandb.config.update(args)
-        print(f"Start with wandb with {args.project_name}")
-    print(f"Start without wandb")
+        print(f"Start with wandb with {args.project_name} and method1=={args.method1}")
+    else:
+        print(f"Start without wandb with method1=={args.method1}")
 
     args = parser.parse_args()
     main(args)
