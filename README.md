@@ -33,7 +33,7 @@ Sogang Univ. Grad.
 - To train a CNN model, we use VOC2012 trainval dataset
 - To test a CNN model, we use VOC2007 test dataset
 
-## Model Settig
+## Model Setting
 - We leverage Resnet-18, Resnet-50, Resnet-101 to test our augmentation method.
 - Two major options for model, which are from scratch and from pre-trained weights on ImageNet.
 - To measure our augmentation method properly, It needs to be measured by class-by-class mAP.
