@@ -1,9 +1,10 @@
+import pdb
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import torchvision.models as models
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, classification_report, confusion_matrix
 
 import os
 import numpy as np
@@ -20,14 +21,42 @@ from schedulers import CosineAnnealingWarmUpRestarts
 import warnings
 warnings.filterwarnings(action='ignore')
 
-def compute_mAP(labels,outputs):
-    y_true = labels.cpu().numpy()
-    y_pred = outputs.cpu().numpy()
-    AP = []
-    for i in range(y_true.shape[0]):
-        AP.append(average_precision_score(y_true[i],y_pred[i]))
+def compute_mAP(targs, preds, class_ap=False):
+    targs = targs.cpu().numpy()
+    preds = preds.cpu().numpy()
 
-    return np.mean(AP)
+    if np.size(preds) == 0:
+        return 0
+    ap = np.zeros((preds.shape[1]))
+    # compute average precision for each class
+    for k in range(preds.shape[1]):
+        # sort scores
+        scores = preds[:, k]
+        targets = targs[:, k]
+        # compute average precision
+        ap[k] = compute_AP(scores, targets)
+    if class_ap:
+        return ap
+    else:
+        return ap.mean()
+
+
+def compute_AP(output, label):
+    epsilon = 1e-8
+    
+    indices = output.argsort()[::-1]
+    total_count_ = np.cumsum(np.ones((len(output), 1)))
+    
+    label_ = label[indices]
+    ind = label_ == 1
+    pos_count_ = np.cumsum(ind)
+    total = pos_count_[-1]
+    pos_count_[np.logical_not(ind)] = 0
+    pp = pos_count_ / total_count_
+    precision_at_i_ = np.sum(pp)
+    precision_at_i = precision_at_i_ / (total + epsilon)
+
+    return precision_at_i
 
 
 def set_transforms():
@@ -52,8 +81,8 @@ def set_transforms():
     return data_transform
 
 
-def load_model(num_classes):
-    model = models.resnet18(pretrained=False)
+def load_model(num_classes, pretrained=True):
+    model = models.resnet50(pretrained=pretrained)
     in_ftrs = model.fc.in_features
     model.fc = nn.Linear(in_ftrs, num_classes)
 
@@ -126,11 +155,11 @@ def valid(args, model, criterion, valid_loader):
     total_loss = 0
     mAP = []
    
-    with torch.no_grad():
-        batch_bar = tqdm(total=len(valid_loader), dynamic_ncols=True, leave=False, position=0, desc='Valid')
-        for x, y in valid_loader:
-            x, y = x.to(args.device), y.to(args.device)
-            
+    batch_bar = tqdm(total=len(valid_loader), dynamic_ncols=True, leave=False, position=0, desc='Valid')
+    for x, y in valid_loader:
+        x, y = x.to(args.device), y.to(args.device)
+
+        with torch.no_grad():
             pred = model(x)
             loss = criterion(pred, y)
             total_loss += loss
@@ -146,15 +175,38 @@ def valid(args, model, criterion, valid_loader):
             batch_bar.update()
         batch_bar.close()
 
-        epoch_loss = total_loss / ceil(len(valid_loader.dataset)/valid_loader.batch_size)
-        mAP_mean = sum(mAP) / len(mAP)
-    
+    epoch_loss = total_loss / ceil(len(valid_loader.dataset)/valid_loader.batch_size)
+    mAP_mean = sum(mAP) / len(mAP)
+
     if args.wandb:
         wandb.log({"Valid loss": epoch_loss})
         wandb.log({"Valid mAP": mAP_mean})
-    
+
     return  epoch_loss, mAP_mean
 
+def test(args, test_loader):
+    model = load_model(num_classes=20, pretrained=False).to(args.device)
+    model.load_state_dict(torch.load(args.test_model))
+    model.eval()
+
+    torch.cuda.empty_cache()
+
+    APs = np.zeros((20))
+    for x, y in tqdm(test_loader):
+        x, y = x.to(args.device), y.to(args.device)
+
+        with torch.no_grad():
+            pred = model(x)
+
+            running_ap = compute_mAP(y.data, pred.data, class_ap=True)
+            APs = np.vstack((APs, running_ap))
+        
+            del x, y, pred
+            torch.cuda.empty_cache()
+    class_ap = 100 * APs.sum(axis=0) / (APs.shape[0] -1)
+    mAP = class_ap.mean()
+    print("mAP is {:0.2f} \nClass_aps are {}".format(mAP, np.round(class_ap, 2)))
+    
 
 def main(args, download_data=False):
 
@@ -186,92 +238,102 @@ def main(args, download_data=False):
 
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    test_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-    # Model
-    model = load_model(num_classes=20)
-    model = model.to(args.device)
+    if not args.test:
+        # Model
+        model = load_model(num_classes=20)
+        model = model.to(args.device)
 
-    # Optimizer & Scheduler & Criterion
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                                lr=args.lr,momentum=0.99,weight_decay = 0.0001)
-    # optimizer = torch.optim.SGD([   
-    #         {'params': list(model.parameters())[:-1], 'lr': lr[0], 'momentum': 0.9},
-    #         {'params': list(model.parameters())[-1], 'lr': lr[1], 'momentum': 0.9}
-    #         ])
-    
-    if args.scheduler == "step":
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
+        # Optimizer & Scheduler & Criterion
+        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                                    lr=args.lr,momentum=0.99,weight_decay = 0.0001)
+        # optimizer = torch.optim.SGD([   
+        #         {'params': list(model.parameters())[:-1], 'lr': lr[0], 'momentum': 0.9},
+        #         {'params': list(model.parameters())[-1], 'lr': lr[1], 'momentum': 0.9}
+        #         ])
+        
+        if args.scheduler == "step":
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
 
-    elif args.scheduler == "cosine":
-        # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=0.001, gamma=0.7, last_epoch=-1)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
-    
-    if args.criterion == "BCE":
-        criterion = nn.BCEWithLogitsLoss(reduction='sum')
-    elif args.criterion == "Soft":
-        criterion = nn.MultiLabelSoftMarginLoss()
+        elif args.scheduler == "cosine":
+            # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=0.001, gamma=0.7, last_epoch=-1)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(len(train_loader)), eta_min=1e-5, last_epoch=-1)
+        else:
+            scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=args.lr, max_lr=0.01, step_size_up=50, step_size_down=None, mode='triangular2')
+        
+        if args.criterion == "BCE":
+            criterion = nn.BCEWithLogitsLoss(reduction='sum')
+        elif args.criterion == "soft":
+            criterion = nn.MultiLabelSoftMarginLoss()
 
-    log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
-    log_file.write(f"--- Experiment with method1 {args.method1} --- \n")
+        log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
+        log_file.write(f"--- Experiment with method1 {args.method1} --- \n")
 
-    best_map = 0
-    for epoch in range(args.epochs):
-        print("Epoch {}/{}".format((epoch+1), args.epochs))
-        log_file.write("Epoch {}/{} \n".format((epoch+1), args.epochs))
+        best_map = 0
+        for epoch in range(args.epochs):
+            print("Epoch {}/{}".format((epoch+1), args.epochs))
+            log_file.write("Epoch {}/{} \n".format((epoch+1), args.epochs))
 
-        # Training
-        train_loss, train_map = train(args, model, optimizer, scheduler, criterion, train_loader)
-        print("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f}".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
-        log_file.write("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f} \n".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+            # Training
+            train_loss, train_map = train(args, model, optimizer, scheduler, criterion, train_loader)
+            print("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f}".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+            log_file.write("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f} \n".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
 
-        # Validation
-        valid_loss, valid_map = valid(args, model, criterion, valid_loader)
-        print("Valid Loss {:.04f}, mAP {:.4f}".format(valid_loss, valid_map))
-        log_file.write("Valid Loss {:.04f}, mAP {:.4f} \n".format(valid_loss, valid_map))
+            # Validation
+            valid_loss, valid_map = valid(args, model, criterion, valid_loader)
+            print("Valid Loss {:.04f}, mAP {:.4f}".format(valid_loss, valid_map))
+            log_file.write("Valid Loss {:.04f}, mAP {:.4f} \n".format(valid_loss, valid_map))
 
 
-        # Early stopping
-        if best_map != 0 and 0 < best_map-valid_map < 0.0002:
-            print(f"--- early stopped at epoch {epoch+1} ---")
-            break
+            # Early stopping
+            if best_map != 0 and 0 < best_map-valid_map < 0.00001:
+                print(f"--- early stopped at epoch {epoch+1} ---")
+                break
 
-        # save best weight
-        if valid_map > best_map:
-            best_map = valid_map
-            
-            torch.save(model.state_dict(), os.path.join(save_dir, "model-{}.pth".format(epoch+1)))
-            torch.save(model.state_dict(), os.path.join(save_dir, "model-best.pth"))
-            print("--- best model saved at {} ---".format(save_dir))
+            # save best weight
+            if valid_map > best_map:
+                best_map = valid_map
+                
+                torch.save(model.state_dict(), os.path.join(save_dir, "epoch-{}.pth".format(epoch+1)))
+                torch.save(model.state_dict(), os.path.join(save_dir, "best.pth"))
+                print("--- best model saved at {} ---".format(save_dir))
 
-            weight_files = os.listdir(save_dir).sort()
-            if weight_files and len(weight_files) > 10:
-                os.remove(os.path.join(args.save_dir, weight_files[0]))
+                weight_files = os.listdir(save_dir).sort()
+                if weight_files and len(weight_files) > 10:
+                    os.remove(os.path.join(args.save_dir, weight_files[0]))
+
+    if args.test:
+        print("---------- TEST START -----------")
+        test(args, test_loader)
     
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="VOCdevkit", type=str)
-    parser.add_argument("--save-dir", default="runs/no_method", type=str)
+    parser.add_argument("--save-dir", default="runs/pretrained/no_method", type=str)
     parser.add_argument("--project-name", default="base", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
     parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
     parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
-    parser.add_argument("--scheduler", default="step", type=str, help="select scheduler")
-    parser.add_argument("--criterion", default="BCE", type=str, help="select scheduler")
+    parser.add_argument("--scheduler", default="", type=str, help="select scheduler [step, cosine, cyclic]")
+    parser.add_argument("--criterion", default="BCE", type=str, help="select criterion [BCE, soft]")
     parser.add_argument("--num-workers", default=8, type=int)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-entity", default="", type=str)
     parser.add_argument("--method1", action="store_true")
+    parser.add_argument("--test", action="store_true")
+    parser.add_argument("--test-model", default="./runs/pretrained/no_method/test_0/best.pth", type=str, help="set test model path")
     args = parser.parse_args()
     print(args)
 
     if args.wandb == True:    
         wandb.init(project=args.project_name, entity=args.wandb_entity)
         wandb.config.update(args)
-        print(f"Start with wandb with {args.project_name} and method1=={args.method1}")
+        print(f"Start with wandb with {args.project_name} || method1=={args.method1}")
     else:
-        print(f"Start without wandb with method1=={args.method1}")
+        print(f"Start without wandb || method1=={args.method1}")
 
     args = parser.parse_args()
     main(args)
