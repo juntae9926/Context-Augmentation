@@ -1,6 +1,5 @@
 # ContextAugment
-Implementation of Context considered for Data Augmentation. <br>
-Repository of Big Data Computing(CSE6528, AIE6202)  
+Implementation of Context considered for Data Augmentation. <br> 
 Sogang Univ. Grad.
 
 ## Co-Occurence in PascalVOC2012 Dataset
