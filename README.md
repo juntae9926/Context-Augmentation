@@ -1,17 +1,22 @@
 # ContextAugment
-Implementation of Context considered for Data Augmentation. <br> 
+Implementation of Context-aware methods for multi-label classification. <br> 
 Sogang Univ. Grad.
 
-## Co-Occurence in PascalVOC2012 Dataset
+## Example of co-occurence matrix (PascalVOC 2012)
 <img width="60%" src="https://user-images.githubusercontent.com/81060548/196676003-8572462f-b726-4254-92a2-86694d7ba197.png"/>
 
 # Proposed Methods
 
-## Method 1 - using a bounding box or polygon segmentation
+## Augmentation for minority
+### Method 1 - using a bounding box or polygon segmentation
 <img width="30%" src="https://user-images.githubusercontent.com/81060548/196677700-6043b838-4b98-44f1-b88a-6770d684f0c5.png"/>
 
-## Method 2 - image to patch level
+### Method 2 - image to patch level
 <img width="30%" src="https://user-images.githubusercontent.com/81060548/196677869-f73b9882-e4da-4509-9b0c-8d80e424993b.png"/>
+
+## Semi-supervised method for majority
+- MoCov2
+
 
 # Project Architecture
 ```shell
