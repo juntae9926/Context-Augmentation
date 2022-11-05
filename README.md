@@ -2,6 +2,13 @@
 Implementation of Context-aware methods for multi-label classification. <br> 
 Sogang Univ. Grad.
 
+## Requirements
+```shell
+Python>=3.8
+Pytorch>=1.10.0
+pip install -r requirements.txt
+```
+
 ## Example of co-occurence matrix (PascalVOC 2012)
 <img width="60%" src="https://user-images.githubusercontent.com/81060548/196676003-8572462f-b726-4254-92a2-86694d7ba197.png"/>
 
