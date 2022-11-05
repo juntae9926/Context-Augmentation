@@ -61,7 +61,8 @@ method1 | 86.16 | 92.07 | 95.65 | 90. | 88.28 | 67.45 | 84.27 | 95.04 | 97.16 | 
 
 
 ## ToDo
-- [ ] Apply minimum selection algorithm on datalaader [dataloader - method 1]
+- [X] Implement AP score matrix for multi-label classification
+- [ ] Apply minimum selection algorithm on datalaader
 - [ ] Visualize co-occurrence matrix every epoch [main - epoch]
 - [ ] Compare unrel_matrix and performances [evaluate heuristically]
-- [ ] Test pre-trained weights with freezing
+- [ ] Using MOCOv2 to prevent performance of majority pair 
