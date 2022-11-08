@@ -110,6 +110,20 @@ def make_instance(mask, img, label):
 
     return img # mask로 추출된 instance image 추출( 원하는 부분만 원래 값을 사용하고, 나머지는 0인 이미지 )
 
+def make_mask_poly(img,segment_anno,instance_label):
+
+    masks=[]
+    for i in segment_anno:
+
+        mask_img=Image.new('L',(img.shape[1],img.shape[0]),0)
+        ImageDraw.Draw(mask_img).polygon(i,outline=instance_label,fill=instance_label)
+        masks.append(numpy.array(mask_img))
+    
+    result=np.zeros((img.shape[0],img.shape[1]),dtype='uint8')
+    for i in masks:
+        result+=i
+
+    return result
 
 # methode 1에 사용되는 함수
 def make_mask(img,label,instance_label):
@@ -224,8 +238,33 @@ def method2(dataset_path):
         mixed_img = make_mixed_image(img1, mask1, img2)
         save_numpy_image(f'bbox_method2.png', mixed_img)
 
+def test():
+    with open('annotations/result.json','r') as f:
+        json_data=json.load(f)
+
+    img_list=[]
+    img_name=[]
+    cnt=0
+    for i in json_data:
+        if cnt>=2:
+            break
+
+        img = np.array(Image.open('val2017/'+i.zfill(12)+".jpg"))
+        img_name.append(i)
+        img_list.append(img)
+        cnt+=1
+    
+    mask1=make_mask_poly(img_list[0],json_data[img_name[0]]['segmentation'][1],json_data[img_name[0]]['category_id'][0])
+    mask2=make_mask_poly(img_list[1],json_data[img_name[1]]['segmentation'][1],json_data[img_name[1]]['category_id'][0])
+    
+    instance_img=make_instance(mask1,img_list[0],json_data[img_name[0]]['category_id'][0])
+    mixed_img = make_mixed_image(img_list[1], mask2, instance_img)
+    save_numpy_image(f'test.png', mixed_img)
+
         
 if __name__ ==  "__main__":
+    test()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-path", default="./VOCdevkit/VOC2012", type=str, help="get dataset path")
     args = parser.parse_args()
