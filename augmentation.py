@@ -1,4 +1,4 @@
-from __future__ import annotations
+# from __future__ import annotatiosns
 from asyncio.proactor_events import _ProactorBaseWritePipeTransport
 import random
 import os
@@ -8,12 +8,32 @@ from PIL import Image
 from tqdm.notebook import tqdm
 import xmltodict
 import argparse
-
+from pycocotools.coco import COCO
 
 labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
           'train', 'tvmonitor']
 label_img = {}
+
+# 91 * 91 size co-occurrence matrix
+def get_comatrix_coco():
+    annFile = 'data/annotations/instances_train2017.json'
+    coco = COCO(annFile)
+    cats = coco.loadCats(coco.getCatIds())
+    labels = [cat['name'] for cat in cats]
+    co_matrix = np.zeros([92, 92])
+    for i in [0, 12, 26, 29, 30, 45, 66, 68, 69, 71, 83, 91]:
+        co_matrix[i] = np.inf
+    for i in range(582000):
+        annIds = coco.getAnnIds(imgIds = i)
+        catIds = set()
+        for annId in annIds:
+            ann = coco.loadAnns(annId)
+            catIds.add(ann[0]['category_id'])
+        for occ_i in catIds:
+            for occ_j in catIds:
+                co_matrix[occ_i][occ_j] += 1
+    return co_matrix
 
 
 # read files and return co-occurence matrix
@@ -263,7 +283,7 @@ def test():
 
         
 if __name__ ==  "__main__":
-    test()
+    # test()
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-path", default="./VOCdevkit/VOC2012", type=str, help="get dataset path")
@@ -274,7 +294,8 @@ if __name__ ==  "__main__":
     is_segmented=True
 
     co_occur = get_comatrix(args.dataset_path, segmented=is_segmented)
-    print(co_occur)
+    co_matrix = get_comatrix_coco()
+    # print(co_occur)
     unrel_pairs = get_unrel_pairs(co_occur)
     print(f"number of unrelated pairs: {len(unrel_pairs)}")
 
