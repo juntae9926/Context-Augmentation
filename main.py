@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 
-from dataset import PascalVOC_Dataset
+from dataset import PascalVOC_Dataset, CustomDataset, my_collate
 import wandb
 
 from math import ceil
@@ -206,9 +206,10 @@ def test(args, test_loader):
     class_ap = 100 * APs.sum(axis=0) / (APs.shape[0] -1)
     mAP = class_ap.mean()
     print("mAP is {:0.2f} \nClass_aps are {}".format(mAP, np.round(class_ap, 2)))
-    
 
-def main(args, download_data=False):
+
+
+def main(args):
 
     if not os.path.isdir(args.save_dir):
         save_dir = os.path.join(args.save_dir, 'test_0')
@@ -218,31 +219,33 @@ def main(args, download_data=False):
         save_dir = os.path.join(args.save_dir, "test_%d" % len(weight_dirs))
         os.makedirs(save_dir)
 
-    data_transform = set_transforms()
+    data_transforms = set_transforms()
 
-    dataset_train = PascalVOC_Dataset(args.data_dir,
-                                      year='2012',
-                                      image_set='trainval', 
-                                      download=download_data, 
-                                      transform=data_transform['train'], 
-                                      target_transform=encode_labels,
-                                      use_method1 = args.method1)
+    # dataset_train = PascalVOC_Dataset(args.data_dir,
+    #                                   year='2012',
+    #                                   image_set='trainval', 
+    #                                   download=download_data, 
+    #                                   transform=data_transform['train'], 
+    #                                   target_transform=encode_labels,
+    #                                   use_method1 = args.method1)
     
-    dataset_valid = PascalVOC_Dataset(root=args.data_dir,
-                                      year='2007',
-                                      image_set='test',
-                                      download=download_data,
-                                      transform=data_transform['valid'],
-                                      target_transform=encode_labels,
-                                      use_method1 = args.method1)
+    # dataset_valid = PascalVOC_Dataset(root=args.data_dir,
+    #                                   year='2007',
+    #                                   image_set='test',
+    #                                   download=download_data,
+    #                                   transform=data_transform['valid'],
+    #                                   target_transform=encode_labels,
+    #                                   use_method1 = args.method1)
 
-    train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers)
-    valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    test_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["train"])
+
+    train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
+    # valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    # test_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     if not args.test:
         # Model
-        model = load_model(num_classes=20)
+        model = load_model(num_classes=80)
         model = model.to(args.device)
 
         # Optimizer & Scheduler & Criterion
@@ -310,7 +313,7 @@ def main(args, download_data=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="VOCdevkit", type=str)
+    parser.add_argument("--data-dir", default="./data/", type=str)
     parser.add_argument("--save-dir", default="runs/pretrained/no_method", type=str)
     parser.add_argument("--project-name", default="base", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")

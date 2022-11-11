@@ -1,17 +1,203 @@
+import torch
+from torch.utils.data import Dataset
 import torchvision.datasets.voc as voc
 import xml.etree.ElementTree as elemTree
 from typing import Any, Dict
+import os
 
 import collections
 import numpy as np
 from itertools import permutations, combinations
+from pycocotools.coco import COCO
+from pycocotools import mask as coco_mask
+from PIL import Image, ImageDraw
+import random
+import cv2
 
 from augmentation import *
 
-labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
-          'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
-          'train', 'tvmonitor']
+# labels = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
+#           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
+#           'train', 'tvmonitor']
 
+def get_comatrix_coco(coco_instance):
+    coco = coco_instance
+    cats = coco.loadCats(coco.getCatIds())
+
+    class_map = [cat['id'] for cat in cats]
+    label_map = [cat['name'] for cat in cats]
+    co_matrix = np.zeros([80, 80])
+    for i in range(582000):
+        annIds = coco.getAnnIds(imgIds = i)
+        catIds = set()
+        for annId in annIds:
+            ann = coco.loadAnns(annId)
+            catIds.add(ann[0]['category_id'])
+        
+        newIds = [class_map.index(i) for i in catIds]
+        for occ_i in newIds:
+            for occ_j in newIds:
+                co_matrix[occ_i][occ_j] += 1
+    return class_map, co_matrix
+
+def my_collate(batch):
+    batch = list(filter(lambda x: x is not None, batch))
+    return torch.utils.data.dataloader.default_collate(batch)
+
+class CustomDataset(Dataset):
+    def __init__(self, root, partition="train2017", use_method = False, annFile=None, transforms=None, k=1):
+
+        self.root = root
+        self.partition = partition
+        self.transforms = transforms
+        self.use_method = use_method
+        self.k = k
+
+        self.coco = COCO(annFile)
+        self.class_map, self.corel_matrix = get_comatrix_coco(self.coco)
+        self.image_idx = list(sorted(self.coco.imgs.keys()))
+
+        self.mix = ContextAugment()
+
+    # def preprocess(self, matrix):
+    #     for i in [0, 12, 26, 29, 30, 45, 66, 68, 69, 71, 83, 91]:
+    #         matrix[i] = np.inf
+    #     return matrix
+
+    def __len__(self):
+        return len(self.image_idx)
+    
+    def __getitem__(self, idx):
+        id = self.image_idx[idx]
+        file_name = self.coco.loadImgs(id)[0]["file_name"]
+        image = Image.open(os.path.join(self.root, self.partition, file_name)).convert("RGB")
+        target = list(set(i['category_id'] for i in self.coco.loadAnns(self.coco.getAnnIds(id))))
+
+        if self.use_method:
+            if len(target) < 1:
+                target = [0 for _ in range(80)] ################ Need Error Handling ################## 일단 레이블 모두 0으로 리턴
+            else:
+                image, target = self.mix_images(image, target)
+
+        if self.transforms is not None:
+            image = self.transforms(image)
+        
+        targets = np.zeros((80))
+        for i in target:
+            targets[i] = 1
+
+        return image, torch.FloatTensor(targets)
+
+    def label_old2new(self, id):
+
+        if (type(id) == int) or (type(id) == float):
+            new_label = self.class_map.index(int(id))
+        else:
+            new_label = [self.class_map.index(int(i)) for i in id]
+        return new_label
+
+    # k: 몇개까지 augmentation 할지 hyperparameter
+    def mix_images(self, image, target):
+        k = self.k
+
+        # 섞을 이미지 클래서 구하기
+        # current_class = target["category_id"] # 여기로부터 가져오게 구현
+        # if current_class[]  # -> k개가 다 차면 다른 곳으로부터 가져오고, 다 찼으면 안함  if else로 구현
+
+        target = self.label_old2new(target) # old -> new
+        class_idx = random.choice(target)
+        candidates = list(np.where(self.corel_matrix[class_idx] < k)[0])
+        if len(candidates) > 0:
+            selected_obj_idx = self.class_map[random.choice(candidates)]     # new -> old          # Random of target stitched
+            stitch_ids = self.coco.catToImgs[selected_obj_idx]
+            selected_id = random.choice(stitch_ids)
+            annotation = self.coco.loadAnns(self.coco.getAnnIds(selected_id)) # Random of target stitcher
+            annotations = [i for i in annotation if i['category_id'] == selected_obj_idx]
+            annotation = annotations[0]
+            
+            stitch_name = self.coco.loadImgs(annotation['image_id'])[0]["file_name"]
+            stitch_img = Image.open(os.path.join(self.root, self.partition, stitch_name)).convert("RGB")
+            image = self.mix(image, stitch_img, annotation)
+
+            selected_obj_idx = self.label_old2new(selected_obj_idx)
+            target.append(selected_obj_idx)
+
+            return Image.fromarray(image), target
+        else:
+            return image, target
+
+
+class ContextAugment(object):
+    def __init__(self, apply_method = True):
+        self.apply_method = apply_method
+
+    def __call__(self, img, stitch_img, annotation):
+        
+        # 클래스 이미지 하나 잘라오기 using annotations
+            # 이 때 mask 사용 -> polygon to mask 함수 이용
+        # 원래 이미지랑 합성
+        
+        masked_img = self.convert_coco_poly_to_mask(stitch_img, annotation)
+
+        if np.sum(masked_img) > 0:
+            im = Image.fromarray(masked_img)
+            im.save("test.jpg")
+            # rotate masked_img randomly
+            random_angle = random.randint(0, 360)
+            masked_img = self.rotate_image(masked_img, angle=random_angle)
+            im = Image.fromarray(masked_img)
+            im.save("test1.jpg")
+            img = np.transpose(np.array(img), (1, 0, 2))
+            try:
+                y_0, y_1 = np.min(np.where(masked_img == 1)[0]), np.max(np.where(masked_img == 1)[0])
+                x_0, x_1 = np.min(np.where(masked_img == 1)[1]), np.max(np.where(masked_img == 1)[1])
+            except:
+                y_0, y_1, x_0, x_1 = 0, 0, 0, 0
+            masked_img = masked_img[y_0:y_1, x_0:x_1, :]
+
+            x_range, y_range = img.shape[1]-masked_img.shape[1], img.shape[0]-masked_img.shape[0]
+            if (x_range < 0) or (y_range < 0):
+                return img
+            x = random.randint(0, x_range)
+            y = random.randint(0, y_range)
+
+            temp_img = np.zeros(img.shape, dtype=np.uint8)
+            temp_img[y:y+masked_img.shape[0], x:x+masked_img.shape[1], :] = masked_img[:, :, :]
+
+            bk_img = img * np.array(temp_img == 0)
+            im = Image.fromarray(bk_img)
+            im.save("test2.jpg")
+
+            augmented_img = np.transpose(bk_img+temp_img, (1,0,2))
+            im = Image.fromarray(augmented_img)
+            im.save("test3.jpg")
+
+            return augmented_img
+        return img
+    
+    def convert_coco_poly_to_mask(self, image, annotation):
+
+        # rles = coco_mask.frPyObjects(annotation['segmentation'], image.height, image.width)
+        # mask = coco_mask.decode(rles)
+
+        mask = Image.new('L', (image.width, image.height), 0) # PIL: [W, H, C]
+        for i in annotation['segmentation']:
+            ImageDraw.Draw(mask).polygon(i, outline=1, fill=1) 
+
+        image = np.array(image) # numpy: [H, W, C]
+        mask = np.expand_dims(np.array(mask), axis=2)
+        masked_image = image * mask
+
+        return masked_image
+    
+    def rotate_image(self, image, angle):
+        image_center = tuple(np.array(image.shape[1::-1]) / 2)
+        rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
+        result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+        return result
+
+
+######################## PASCAL VOC ########################
 
 class PascalVOC:
     def __init__(self, root):
