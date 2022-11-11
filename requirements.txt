@@ -5,6 +5,6 @@ Pillow==9.2.0
 scikit-learn==1.1.2
 tqdm==4.64.1
 xmltodict
-wandb
-opencv-python
-pycocotools
+wandb==0.13.5
+opencv-python>4.6
+pycocotools==2.0.6
