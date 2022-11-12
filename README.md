@@ -1,5 +1,5 @@
 # ContextAugment
-Implementation of Context-aware methods for multi-label classification. <br> 
+Implementation of Context-aware methods for multi-label classification to increase AP of minority co-occurrence pair. <br> 
 Sogang Univ. Grad.
 
 ## Requirements
@@ -21,9 +21,6 @@ pip install -r requirements.txt
 ### Method 2 - image to patch level
 <img width="30%" src="https://user-images.githubusercontent.com/81060548/196677869-f73b9882-e4da-4509-9b0c-8d80e424993b.png"/>
 
-## Semi-supervised method for majority
-- MoCov2
-
 
 # Project Architecture
 ```shell
@@ -36,45 +33,56 @@ pip install -r requirements.txt
 └─README.md
 ```
 
-## augmentation.py
-- Pascal VOC 2012에서 co-occurance가 0인 category pair에서 랜덤으로 이미지를 선택해서 1장씩 augmentation하는 로직까지 완성
-- patch 단위로 붙히는 method 2 완성
+## dataloader.py & augmentation.py
+- Implementation of augmentation for minority co-occurrence pair(k-pair) from dataset
+- Augmentation Method 2(patch-level; similar as Cutmix) 
 
 ## Dataset Overview
-- To train a CNN model, we use VOC2012 trainval dataset
-- To test a CNN model, we use VOC2007 test dataset
+- Train a model on MS-COCO 2017 train/val dataset
+- Test a trained model using MS-COCO 2017 test dataset
+
+- To train a model, we use Pascal-VOC 2012 trainval dataset
+- To test a model, we use Pascal-VOC 2007 test dataset
 
 ## Model Setting
 - We leverage Resnet-18, Resnet-50, Resnet-101 to test our augmentation method.
 - Two major options for model, which are from scratch and from pre-trained weights on ImageNet.
-- To measure our augmentation method properly, It needs to be measured by class-by-class mAP.
+- Our purpose of this augmentation is raising APs of minority class. It means that the model should be measured by classes-by-class AP tomeasure our augmentation method properly.
 
 ## How to Use
 - If you want to apply the original setting, just use train.sh as a script
-- For modifying other options, you can make a script as below.
+- To train model with another option, make your own script modifying the hyperparameters.
 ```
 python3 main.py --lr 0.001 \
                 --batch-size 64 \
                 --scheduler cosine \
                 --criterion soft \
                 --device cuda:0 \
-                --method1 \
-                --save-dir runs/method1
+                --use-method \
+                --save-dir runs/method
 ```
 
 ## Results
 
-
+### Pascal-VOC
 class | mAP | #0 | #1 | #2 | #3 | #4 | #5 | #6 | #7 | #8 | #9 | #10 | #11 | #12 | #13 | #14 | #15 | #16 | #17 | #18 | #19 
 --- | --- | --- | --- | --- |--- |--- |--- |--- |--- |--- |--- |--- |--- | --- | --- |--- |--- |--- |--- |--- |--- 
 no-method |  86.24  | 91.96 | 94.7 | 90.65 | 88.31 | 66.1 | 84.85 | 95.14 | 96.6 | 74.97 | 75.66 | 81.75 | 96.6 | 95.97 | 92.54 | 97.57 | 72.41 | 65.46 | 79.93 | 99.45 | 84.24 |---
-method1 | 86.16 | 92.07 | 95.65 | 90. | 88.28 | 67.45 | 84.27 | 95.04 | 97.16 | 75. | 73.75 | 82.03 | 97.08 | 95.9 | 91.95 | 97.44 | 70.83 | 65.35 | 81.06 | 98.53 | 84.39 | 
+use-method | 86.16 | 92.07 | 95.65 | 90. | 88.28 | 67.45 | 84.27 | 95.04 | 97.16 | 75. | 73.75 | 82.03 | 97.08 | 95.9 | 91.95 | 97.44 | 70.83 | 65.35 | 81.06 | 98.53 | 84.39 | 
 
-
+### MS-COCO
+class | mAP |
+--- | --- | 
+no-method |    | 
+use-method |  | 
 
 ## ToDo
-- [X] Implement AP score matrix for multi-label classification
-- [ ] Apply minimum selection algorithm on datalaader
-- [ ] Visualize co-occurrence matrix every epoch [main - epoch]
+- [X] To test properly, AP score matrix for multi-label classification
+- [X] MS-COCO dataloader with our augmentation method
+- [X] Apply K-select option with initial co-occurrence matrix
+- [X] Poisition randomness of attached object
+- [ ] Size randomness of attached object
+- [X] Angle randomness of attached object
+- [ ] inpainting method to test trained model
 - [ ] Compare unrel_matrix and performances [evaluate heuristically]
-- [ ] Using MOCOv2 to prevent performance of majority pair 
+- [ ] Contrastive learning to prevent performance of majority pair(optinal)
