@@ -1,4 +1,3 @@
-import pdb
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -145,7 +144,6 @@ def train(args, model, optimizer, scheduler, criterion, train_loader):
         wandb.log({"Train loss": epoch_loss})
         wandb.log({"Train mAP": mAP_mean})
         
-
     return epoch_loss, mAP_mean
 
 
@@ -185,6 +183,7 @@ def valid(args, model, criterion, valid_loader):
     return  epoch_loss, mAP_mean
 
 def test(args, test_loader):
+
     model = load_model(num_classes=20, pretrained=False).to(args.device)
     model.load_state_dict(torch.load(args.test_model))
     model.eval()
@@ -238,10 +237,10 @@ def main(args):
     #                                   use_method1 = args.method1)
 
     dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["train"])
+    dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile="./data/annotations/instances_val2017.json", transforms=data_transforms["valid"])
 
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
-    # valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    # test_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     if not args.test:
         # Model
@@ -257,7 +256,7 @@ def main(args):
         #         ])
         
         if args.scheduler == "step":
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.9)
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=len(train_loader), gamma=0.9)
 
         elif args.scheduler == "cosine":
             # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=len(train_loader), T_mult=1, eta_max=0.001, gamma=0.7, last_epoch=-1)
@@ -271,7 +270,7 @@ def main(args):
             criterion = nn.MultiLabelSoftMarginLoss()
 
         log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
-        log_file.write(f"--- Experiment with method1 {args.method1} --- \n")
+        log_file.write(f"--- Experiment with method {args.use_method} --- \n")
 
         best_map = 0
         for epoch in range(args.epochs):
@@ -307,6 +306,8 @@ def main(args):
                     os.remove(os.path.join(args.save_dir, weight_files[0]))
 
     if args.test:
+        dataset_test = CustomDataset(root=args.data_dir, partition="test2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["valid"])
+        test_loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
         print("---------- TEST START -----------")
         test(args, test_loader)
     
@@ -314,18 +315,18 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="./data/", type=str)
-    parser.add_argument("--save-dir", default="runs/pretrained/no_method", type=str)
+    parser.add_argument("--save-dir", default="runs/pretrained/method", type=str)
     parser.add_argument("--project-name", default="base", type=str)
-    parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
+    parser.add_argument("--device", default="cuda:1", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
     parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
-    parser.add_argument("--lr", default=0.001, type=float, help="Learning rate")
+    parser.add_argument("--lr", default=0.01, type=float, help="Learning rate")
     parser.add_argument("--scheduler", default="", type=str, help="select scheduler [step, cosine, cyclic]")
     parser.add_argument("--criterion", default="BCE", type=str, help="select criterion [BCE, soft]")
     parser.add_argument("--num-workers", default=8, type=int)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-entity", default="", type=str)
-    parser.add_argument("--method1", action="store_true")
+    parser.add_argument("--use-method", action="store_true")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--test-model", default="./runs/pretrained/no_method/test_0/best.pth", type=str, help="set test model path")
     args = parser.parse_args()
@@ -334,9 +335,9 @@ if __name__ == "__main__":
     if args.wandb == True:    
         wandb.init(project=args.project_name, entity=args.wandb_entity)
         wandb.config.update(args)
-        print(f"Start with wandb with {args.project_name} || method1=={args.method1}")
+        print(f"Start with wandb with {args.project_name} || method=={args.use_method}")
     else:
-        print(f"Start without wandb || method1=={args.method1}")
+        print(f"Start without wandb || method=={args.use_method}")
 
     args = parser.parse_args()
     main(args)
