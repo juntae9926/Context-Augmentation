@@ -236,7 +236,7 @@ def main(args):
     #                                   target_transform=encode_labels,
     #                                   use_method1 = args.method1)
 
-    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["train"])
+    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["train"], k=args.k)
     dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile="./data/annotations/instances_val2017.json", transforms=data_transforms["valid"])
 
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
@@ -323,6 +323,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", default=0.01, type=float, help="Learning rate")
     parser.add_argument("--scheduler", default="", type=str, help="select scheduler [step, cosine, cyclic]")
     parser.add_argument("--criterion", default="BCE", type=str, help="select criterion [BCE, soft]")
+    parser.add_argument("--k", default=1, type=int, help="set maximum pairs to use the method")
     parser.add_argument("--num-workers", default=8, type=int)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-entity", default="", type=str)
