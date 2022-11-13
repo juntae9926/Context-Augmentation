@@ -81,7 +81,7 @@ def set_transforms():
 
 
 def load_model(num_classes, pretrained=True):
-    model = models.resnet50(pretrained=pretrained)
+    model = models.resnet101(pretrained=pretrained)
     in_ftrs = model.fc.in_features
     model.fc = nn.Linear(in_ftrs, num_classes)
 
@@ -105,6 +105,7 @@ def train(args, model, optimizer, scheduler, criterion, train_loader):
     Returns:
         train and valid history [loss, map]
     """
+    scaler = torch.cuda.amp.GradScaler()
 
     model.train()
     total_loss = 0
@@ -114,13 +115,17 @@ def train(args, model, optimizer, scheduler, criterion, train_loader):
     for x, y in train_loader:
         x, y = x.to(args.device), y.to(args.device)
 
-        optimizer.zero_grad()
-        pred = model(x)
-        loss = criterion(pred, y)
+        
+        with torch.cuda.amp.autocast():
+            pred = model(x)
+            loss = criterion(pred, y)
 
         total_loss += loss
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        optimizer.zero_grad()
         scheduler.step()
 
         running_map = compute_mAP(y.data, pred.data)
@@ -182,15 +187,18 @@ def valid(args, model, criterion, valid_loader):
 
     return  epoch_loss, mAP_mean
 
-def test(args, test_loader):
+def test(args, test_loader, save_dir=None):
 
-    model = load_model(num_classes=20, pretrained=False).to(args.device)
-    model.load_state_dict(torch.load(args.test_model))
+    model = load_model(num_classes=80, pretrained=False).to(args.device)
+    if save_dir:
+        model.load_state_dict(torch.load(os.path.join(save_dir, "best.pth")))
+    else:
+        model.load_state_dict(torch.load(args.test_model))
     model.eval()
 
     torch.cuda.empty_cache()
 
-    APs = np.zeros((20))
+    APs = np.zeros((80))
     for x, y in tqdm(test_loader):
         x, y = x.to(args.device), y.to(args.device)
 
@@ -275,16 +283,19 @@ def main(args):
         best_map = 0
         for epoch in range(args.epochs):
             print("Epoch {}/{}".format((epoch+1), args.epochs))
+            log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
             log_file.write("Epoch {}/{} \n".format((epoch+1), args.epochs))
 
             # Training
             train_loss, train_map = train(args, model, optimizer, scheduler, criterion, train_loader)
             print("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f}".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
+            log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
             log_file.write("Train Loss {:.04f}, mAP {:.04f}, Learning rate {:.06f} \n".format(train_loss, train_map, float(optimizer.param_groups[0]['lr'])))
 
             # Validation
             valid_loss, valid_map = valid(args, model, criterion, valid_loader)
             print("Valid Loss {:.04f}, mAP {:.4f}".format(valid_loss, valid_map))
+            log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
             log_file.write("Valid Loss {:.04f}, mAP {:.4f} \n".format(valid_loss, valid_map))
 
 
@@ -309,8 +320,10 @@ def main(args):
         dataset_test = CustomDataset(root=args.data_dir, partition="test2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["valid"])
         test_loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
         print("---------- TEST START -----------")
-        test(args, test_loader)
-    
+        if save_dir:
+            test(args, test_loader, save_dir)
+        else:
+            test(args, test_loader)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
