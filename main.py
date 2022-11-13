@@ -244,8 +244,8 @@ def main(args):
     #                                   target_transform=encode_labels,
     #                                   use_method1 = args.method1)
 
-    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["train"], k=args.k)
-    dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile="./data/annotations/instances_val2017.json", transforms=data_transforms["valid"])
+    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile=os.path.join(args.data_dir, "annotations/instances_train2017.json"), transforms=data_transforms["train"], k=args.k)
+    dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile=os.path.join(args.data_dir, "annotations/instances_val2017.json"), transforms=data_transforms["valid"])
 
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
@@ -317,7 +317,7 @@ def main(args):
                     os.remove(os.path.join(args.save_dir, weight_files[0]))
 
     if args.test:
-        dataset_test = CustomDataset(root=args.data_dir, partition="test2017", use_method = True, annFile="./data/annotations/instances_train2017.json", transforms=data_transforms["valid"])
+        dataset_test = CustomDataset(root=args.data_dir, partition="test2017", use_method = True, annFile=os.path.join(args.data_dir, "annotations/instances_test2017.json"), transforms=data_transforms["valid"])
         test_loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
         print("---------- TEST START -----------")
         if save_dir:
@@ -327,14 +327,14 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", default="./data/", type=str)
+    parser.add_argument("--data-dir", default="./data", type=str)
     parser.add_argument("--save-dir", default="runs/pretrained/method", type=str)
     parser.add_argument("--project-name", default="base", type=str)
-    parser.add_argument("--device", default="cuda:1", type=str, help="Select cuda:0 or cuda:1")
+    parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
     parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
     parser.add_argument("--lr", default=0.01, type=float, help="Learning rate")
-    parser.add_argument("--scheduler", default="", type=str, help="select scheduler [step, cosine, cyclic]")
+    parser.add_argument("--scheduler", default="step", type=str, help="select scheduler [step, cosine, cyclic]")
     parser.add_argument("--criterion", default="BCE", type=str, help="select criterion [BCE, soft]")
     parser.add_argument("--k", default=1, type=int, help="set maximum pairs to use the method")
     parser.add_argument("--num-workers", default=8, type=int)
