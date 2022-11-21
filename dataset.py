@@ -59,6 +59,21 @@ class CustomDataset(Dataset):
     def __len__(self):
         return len(self.image_idx)
     
+    def get_sample(self):
+        idx=0
+        id = self.image_idx[idx]
+        file_name = self.coco.loadImgs(id)[0]["file_name"]
+        image = Image.open(os.path.join(self.root, self.partition, file_name)).convert("RGB")
+        label = list(set(i['category_id'] for i in self.coco.loadAnns(self.coco.getAnnIds(id)))) # label: old 
+        
+        if self.partition != 'train2017':
+            label = self.label_old2new(label) # label: old -> new
+
+        targets = np.zeros((80))
+        for i in label:
+            targets[i] = 1
+
+        return image,targets
 
     def __getitem__(self, idx):
         id = self.image_idx[idx]
