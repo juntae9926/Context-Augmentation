@@ -5,6 +5,14 @@ from torchvision import datasets, transforms
 import torchvision.models as models
 from sklearn.metrics import average_precision_score, classification_report, confusion_matrix
 
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam import GuidedBackpropReLUModel
+from pytorch_grad_cam.utils.image import show_cam_on_image, \
+    deprocess_image, \
+    preprocess_image
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+
+import cv2
 import os
 import numpy as np
 from tqdm import tqdm
@@ -19,6 +27,9 @@ from schedulers import CosineAnnealingWarmUpRestarts
 
 import warnings
 warnings.filterwarnings(action='ignore')
+
+mean=None
+std=None
 
 def compute_mAP(targs, preds, class_ap=False):
     targs = targs.cpu().numpy()
@@ -59,6 +70,9 @@ def compute_AP(output, label):
 
 
 def set_transforms():
+    global mean
+    global std
+
     mean=[0.457342265910642, 0.4387686270106377, 0.4073427106250871]
     std=[0.26753769276329037, 0.2638145880487105, 0.2776826934044154]
 
@@ -194,6 +208,7 @@ def test(args, test_loader, save_dir=None):
         model.load_state_dict(torch.load(os.path.join(save_dir, "best.pth")))
     else:
         model.load_state_dict(torch.load(args.test_model))
+    cam("test",cam_sample,target,model)
     model.eval()
 
     torch.cuda.empty_cache()
@@ -214,7 +229,42 @@ def test(args, test_loader, save_dir=None):
     mAP = class_ap.mean()
     print("mAP is {:0.2f} \nClass_aps are {}".format(mAP, np.round(class_ap, 2)))
 
+def cam(epoch,data,target,model):
+    method={"gradcam":GradCAM}
+    target_layers = [model.layer4[-1]]
+    rgb_img = data
+    rgb_img = np.float32(rgb_img) / 255
+    input_tensor = preprocess_image(rgb_img,
+                                    mean=mean,
+                                    std=std)
+    targets = [ClassifierOutputTarget(target)]
+    cam_algorithm = methods['gradcam']
 
+    with cam_algorithm(model=model,
+                       target_layers=target_layers,
+                       use_cuda=True) as cam:
+        cam.batch_size = 32
+        grayscale_cam = cam(input_tensor=input_tensor,
+                            targets=targets,
+                            aug_smooth=False,
+                            eigen_smooth=False)
+
+        grayscale_cam = grayscale_cam[0, :]
+        cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+
+        # cam_image is RGB encoded whereas "cv2.imwrite" requires BGR encoding.
+        cam_image = cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR)
+
+    gb_model = GuidedBackpropReLUModel(model=model, use_cuda=True)
+    gb = gb_model(input_tensor, target_category=None)
+
+    cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
+    cam_gb = deprocess_image(cam_mask * gb)
+    gb = deprocess_image(gb)
+
+    cv2.imwrite(f'{str(epoch)}_cam.jpg', cam_image)
+    cv2.imwrite(f'{str(epoch)}_gb.jpg', gb)
+    cv2.imwrite(f'{str(epoch)}_cam_gb.jpg', cam_gb)
 
 def main(args):
 
@@ -246,9 +296,13 @@ def main(args):
 
     dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile=os.path.join(args.data_dir, "annotations/instances_train2017.json"), transforms=data_transforms["train"], k=args.k)
     dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile=os.path.join(args.data_dir, "annotations/instances_val2017.json"), transforms=data_transforms["valid"])
-
+    
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    cam_sample,targets=dataset_train.get_sample()
+    cam_target=targets.index(1)
+    
 
     if not args.test:
         # Model
@@ -298,6 +352,7 @@ def main(args):
             log_file = open(os.path.join(save_dir, "train_log.txt"), "w")
             log_file.write("Valid Loss {:.04f}, mAP {:.4f} \n".format(valid_loss, valid_map))
 
+            #cam(epoch,cam_sample,target,model)
 
             # Early stopping
             if best_map != 0 and 0 < best_map-valid_map < 0.00001:
