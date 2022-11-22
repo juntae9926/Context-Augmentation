@@ -208,7 +208,7 @@ def test(args, test_loader, save_dir=None):
         model.load_state_dict(torch.load(os.path.join(save_dir, "best.pth")))
     else:
         model.load_state_dict(torch.load(args.test_model))
-    cam("test",cam_sample,target,model)
+    #cam("test",cam_sample,target,model)
     model.eval()
 
     torch.cuda.empty_cache()
