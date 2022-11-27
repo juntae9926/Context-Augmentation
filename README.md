@@ -64,6 +64,7 @@ python3 main.py --lr 0.001 \
                 --criterion soft \
                 --device cuda:0 \
                 --use-method \
+                --rotate \
                 --save-dir runs/method
 ```
 
