@@ -8,3 +8,4 @@ xmltodict
 wandb==0.13.5
 opencv-python>4.6
 pycocotools==2.0.6
+ttach==0.0.3
