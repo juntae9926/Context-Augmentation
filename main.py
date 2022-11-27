@@ -294,14 +294,14 @@ def main(args):
     #                                   target_transform=encode_labels,
     #                                   use_method1 = args.method1)
 
-    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile=os.path.join(args.data_dir, "annotations/instances_train2017.json"), transforms=data_transforms["train"], k=args.k)
+    dataset_train = CustomDataset(root=args.data_dir, partition="train2017", use_method = True, annFile=os.path.join(args.data_dir, "annotations/instances_train2017.json"), transforms=data_transforms["train"], k=args.k, rotate=args.rotate)
     dataset_valid = CustomDataset(root=args.data_dir, partition="val2017", use_method = False, annFile=os.path.join(args.data_dir, "annotations/instances_val2017.json"), transforms=data_transforms["valid"])
     
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     cam_sample,targets=dataset_train.get_sample()
-    cam_target=targets.index(1)
+    # cam_target=targets.index(1)
     
 
     if not args.test:
@@ -387,7 +387,7 @@ if __name__ == "__main__":
     parser.add_argument("--project-name", default="base", type=str)
     parser.add_argument("--device", default="cuda:0", type=str, help="Select cuda:0 or cuda:1")
     parser.add_argument("--batch-size", default=64, type=int, help="Batch size")
-    parser.add_argument("--epochs", default=300, type=int, help="Total epochs")
+    parser.add_argument("--epochs", default=30, type=int, help="Total epochs")
     parser.add_argument("--lr", default=0.01, type=float, help="Learning rate")
     parser.add_argument("--scheduler", default="step", type=str, help="select scheduler [step, cosine, cyclic]")
     parser.add_argument("--criterion", default="BCE", type=str, help="select criterion [BCE, soft]")
@@ -396,6 +396,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-entity", default="", type=str)
     parser.add_argument("--use-method", action="store_true")
+    parser.add_argument("--rotate", action="store_true")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--test-model", default="./runs/pretrained/no_method/test_0/best.pth", type=str, help="set test model path")
     args = parser.parse_args()

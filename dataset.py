@@ -42,13 +42,13 @@ def my_collate(batch):
     return torch.utils.data.dataloader.default_collate(batch)
 
 class CustomDataset(Dataset):
-    def __init__(self, root, partition="train2017", use_method = False, annFile=None, transforms=None, k=1):
+    def __init__(self, root, partition="train2017", use_method = False, annFile=None, transforms=None, k=1, rotate=False):
         self.root = root
         self.partition = partition
         self.transforms = transforms
         self.use_method = use_method
         self.k = k  # k: number of augmentation 
-
+        self.rotate = rotate
         self.coco = COCO(annFile)
         self.class_map, self.corel_matrix = get_comatrix_coco(self.coco)
         self.image_idx = list(sorted(self.coco.imgs.keys()))
@@ -121,10 +121,12 @@ class CustomDataset(Dataset):
             
             stitch_name = self.coco.loadImgs(annotation['image_id'])[0]["file_name"]
             stitch_img = Image.open(os.path.join(self.root, self.partition, stitch_name)).convert("RGB")
-            image = self.mix(image, stitch_img, annotation)
+            image, success = self.mix(image, stitch_img, annotation, self.rotate)
 
-            append_obj_idx = self.label_old2new(selected_obj_idx)
-            label.append(append_obj_idx)
+            # append label only when augmentation succeeded. (where not x_range < 0, y_range < 0)
+            if success:
+                append_obj_idx = self.label_old2new(selected_obj_idx)
+                label.append(append_obj_idx)
 
             return Image.fromarray(image), label
         else:
@@ -135,14 +137,20 @@ class ContextAugment(object):
     def __init__(self, apply_method = True):
         self.apply_method = apply_method
 
-    def __call__(self, img, stitch_img, annotation):
+    def __call__(self, img, stitch_img, annotation, rotate):
         masked_img = self.convert_coco_poly_to_mask(stitch_img, annotation)
 
         if np.sum(masked_img) > 0:
             # randomness of rotation
-            random_angle = random.randint(0, 360)
-            masked_img = self.rotate_image(masked_img, angle=random_angle)
+            if rotate:
+                random_angle = random.randint(0, 360)
+                masked_img = self.rotate_image(masked_img, angle=random_angle)
+
+            scale = random.uniform(0.75, 1.5)
+            masked_img = self.scale_image(masked_img, scale)
+
             img = np.transpose(np.array(img), (1, 0, 2))
+
             try:
                 y_0, y_1 = np.min(np.where(masked_img == 1)[0]), np.max(np.where(masked_img == 1)[0])
                 x_0, x_1 = np.min(np.where(masked_img == 1)[1]), np.max(np.where(masked_img == 1)[1])
@@ -152,7 +160,7 @@ class ContextAugment(object):
 
             x_range, y_range = img.shape[1]-masked_img.shape[1], img.shape[0]-masked_img.shape[0]
             if (x_range < 0) or (y_range < 0):
-                return img
+                return img, False
             x = random.randint(0, x_range)
             y = random.randint(0, y_range)
 
@@ -162,9 +170,8 @@ class ContextAugment(object):
             bk_img = img * np.array(temp_img == 0)
             augmented_img = np.transpose(bk_img+temp_img, (1,0,2))
 
-
-            return augmented_img
-        return img
+            return augmented_img, True
+        return img, False
     
     def convert_coco_poly_to_mask(self, image, annotation):
 
@@ -187,6 +194,10 @@ class ContextAugment(object):
         result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
 
         return result
+
+    def scale_image(self, image, scale):
+        tmp = cv2.resize(image, dsize=(int(image.shape[1]*scale), int(image.shape[0]*scale)))
+        return tmp
 
 
 ######################## PASCAL VOC ########################
