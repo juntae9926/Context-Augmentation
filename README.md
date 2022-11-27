@@ -13,6 +13,8 @@ pip install -r requirements.txt
 
 #(PascalVOC 2012)
 <img width="60%" src="https://user-images.githubusercontent.com/81060548/196676003-8572462f-b726-4254-92a2-86694d7ba197.png"/>
+#(MSCOCO labels 0 ~ 10)
+<img width="60%" src="https://user-images.githubusercontent.com/81060548/204138726-2715ef1a-79f5-4e68-8def-28e6a1aeb268.png"/>
 
 # Proposed Methods
 
