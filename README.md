@@ -9,7 +9,9 @@ Pytorch>=1.10.0
 pip install -r requirements.txt
 ```
 
-## Example of co-occurence matrix (PascalVOC 2012)
+## Example of co-occurence matrix 
+
+#(PascalVOC 2012)
 <img width="60%" src="https://user-images.githubusercontent.com/81060548/196676003-8572462f-b726-4254-92a2-86694d7ba197.png"/>
 
 # Proposed Methods
@@ -81,7 +83,7 @@ use-method |  |
 - [X] MS-COCO dataloader with our augmentation method
 - [X] Apply K-select option with initial co-occurrence matrix
 - [X] Poisition randomness of attached object
-- [ ] Size randomness of attached object
+- [X] Size randomness of attached object
 - [X] Angle randomness of attached object
 - [ ] inpainting method to test trained model
 - [ ] Compare unrel_matrix and performances [evaluate heuristically]
