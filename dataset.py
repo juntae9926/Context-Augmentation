@@ -51,6 +51,7 @@ class CustomDataset(Dataset):
         self.rotate = rotate
         self.coco = COCO(annFile)
         self.class_map, self.corel_matrix = get_comatrix_coco(self.coco)
+        self.initial_matrix = self.corel_matrix.copy()
         self.image_idx = list(sorted(self.coco.imgs.keys()))
 
         self.mix = ContextAugment()
@@ -126,11 +127,20 @@ class CustomDataset(Dataset):
             # append label only when augmentation succeeded. (where not x_range < 0, y_range < 0)
             if success:
                 append_obj_idx = self.label_old2new(selected_obj_idx)
+                for item in label:
+                    self.corel_matrix[item][append_obj_idx] += 1
+                    self.corel_matrix[append_obj_idx][item] += 1
                 label.append(append_obj_idx)
 
             return Image.fromarray(image), label
         else:
             return image, label
+    
+    def count_augment(self):
+        total_count = int(np.sum(self.corel_matrix - self.initial_matrix))
+        class_count = np.sum(self.corel_matrix - self.initial_matrix, axis=0)
+        return total_count, class_count
+
 
 
 class ContextAugment(object):
