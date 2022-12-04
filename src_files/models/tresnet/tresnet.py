@@ -1,37 +1,21 @@
+
 import torch
 import torch.nn as nn
 from torch.nn import Module as Module
 from collections import OrderedDict
 
 from .layers.anti_aliasing import AntiAliasDownsampleLayer
-from .layers.avg_pool import FastAvgPool2d
-from src_files.ml_decoder.ml_decoder import MLDecoder
 from .layers.general_layers import SEModule, SpaceToDepthModule
-from inplace_abn import InPlaceABN, ABN
+from .layers.avg_pool import FastAvgPool2d
+from inplace_abn import InPlaceABN
 
 
-def InplacABN_to_ABN(module: nn.Module) -> nn.Module:
-    # convert all InplaceABN layer to bit-accurate ABN layers.
+def IABN2Float(module: nn.Module) -> nn.Module:
+    "If `module` is IABN don't use half precision."
     if isinstance(module, InPlaceABN):
-        module_new = ABN(module.num_features, activation=module.activation,
-                         activation_param=module.activation_param)
-        for key in module.state_dict():
-            module_new.state_dict()[key].copy_(module.state_dict()[key])
-        module_new.training = module.training
-        module_new.weight.data = module_new.weight.abs() + module_new.eps
-        return module_new
-    for name, child in reversed(module._modules.items()):
-        new_child = InplacABN_to_ABN(child)
-        if new_child != child:
-            module._modules[name] = new_child
+        module.float()
+    for child in module.children(): IABN2Float(child)
     return module
-
-def conv2d(ni, nf, stride):
-    return nn.Sequential(
-        nn.Conv2d(ni, nf, kernel_size=3, stride=stride, padding=1, bias=False),
-        nn.BatchNorm2d(nf),
-        nn.ReLU(inplace=True)
-    )
 
 
 def conv2d_ABN(ni, nf, stride, activation="leaky_relu", kernel_size=3, activation_param=1e-2, groups=1):
@@ -42,7 +26,7 @@ def conv2d_ABN(ni, nf, stride, activation="leaky_relu", kernel_size=3, activatio
     )
 
 
-class BasicBlock(Module):
+class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, use_se=True, anti_alias_layer=None):
@@ -81,7 +65,7 @@ class BasicBlock(Module):
         return out
 
 
-class Bottleneck(Module):
+class Bottleneck(nn.Module):
     expansion = 4
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, use_se=True, anti_alias_layer=None):
@@ -127,13 +111,14 @@ class Bottleneck(Module):
         return out
 
 
-class TResNet(Module):
+class TResNet(nn.Module):
 
-    def __init__(self, layers, in_chans=3, num_classes=1000, width_factor=1.0, first_two_layers=BasicBlock):
+    def __init__(self, layers, in_chans=3, num_classes=1000, width_factor=1.0, remove_aa_jit=False):
         super(TResNet, self).__init__()
 
         # JIT layers
         space_to_depth = SpaceToDepthModule()
+        # anti_alias_layer = partial(AntiAliasDownsampleLayer, remove_aa_jit=remove_aa_jit)
         anti_alias_layer = AntiAliasDownsampleLayer
         global_pool_layer = FastAvgPool2d(flatten=True)
 
@@ -141,9 +126,9 @@ class TResNet(Module):
         self.inplanes = int(64 * width_factor)
         self.planes = int(64 * width_factor)
         conv1 = conv2d_ABN(in_chans * 16, self.planes, stride=1, kernel_size=3)
-        layer1 = self._make_layer(first_two_layers, self.planes, layers[0], stride=1, use_se=True,
+        layer1 = self._make_layer(BasicBlock, self.planes, layers[0], stride=1, use_se=True,
                                   anti_alias_layer=anti_alias_layer)  # 56x56
-        layer2 = self._make_layer(first_two_layers, self.planes * 2, layers[1], stride=2, use_se=True,
+        layer2 = self._make_layer(BasicBlock, self.planes * 2, layers[1], stride=2, use_se=True,
                                   anti_alias_layer=anti_alias_layer)  # 28x28
         layer3 = self._make_layer(Bottleneck, self.planes * 4, layers[2], stride=2, use_se=True,
                                   anti_alias_layer=anti_alias_layer)  # 14x14
@@ -160,6 +145,7 @@ class TResNet(Module):
             ('layer4', layer4)]))
 
         # head
+        self.embeddings = []
         self.global_pool = nn.Sequential(OrderedDict([('global_pool_layer', global_pool_layer)]))
         self.num_features = (self.planes * 8) * Bottleneck.expansion
         fc = nn.Linear(self.num_features, num_classes)
@@ -207,38 +193,32 @@ class TResNet(Module):
         return logits
 
 
-def TResnetS(model_params):
-    """Constructs a small TResnet model.
-    """
-    in_chans = 3
-    num_classes = model_params['num_classes']
-    args = model_params['args']
-    model = TResNet(layers=[3, 4, 6, 3], num_classes=num_classes, in_chans=in_chans)
-    return model
-
 def TResnetM(model_params):
-    """Constructs a medium TResnet model.
+    """ Constructs a medium TResnet model.
     """
     in_chans = 3
     num_classes = model_params['num_classes']
+    # remove_aa_jit = model_params['remove_aa_jit']
     model = TResNet(layers=[3, 4, 11, 3], num_classes=num_classes, in_chans=in_chans)
     return model
 
 
 def TResnetL(model_params):
-    """Constructs a large TResnet model.
+    """ Constructs a large TResnet model.
     """
     in_chans = 3
     num_classes = model_params['num_classes']
-    layers_list = [3, 4, 23, 3]
-    model = TResNet(layers=layers_list, num_classes=num_classes, in_chans=in_chans, first_two_layers=Bottleneck)
+    # remove_aa_jit = model_params['remove_aa_jit']
+    model = TResNet(layers=[4, 5, 18, 3], num_classes=num_classes, in_chans=in_chans, width_factor=1.2)
     return model
 
+
 def TResnetXL(model_params):
-    """Constructs a large TResnet model.
+    """ Constructs an extra-large TResnet model.
     """
     in_chans = 3
     num_classes = model_params['num_classes']
-    layers_list = [3, 8, 34, 5]
-    model = TResNet(layers=layers_list, num_classes=num_classes, in_chans=in_chans, first_two_layers=Bottleneck)
+    # remove_aa_jit = model_params['remove_aa_jit']
+    model = TResNet(layers=[4, 5, 24, 3], num_classes=num_classes, in_chans=in_chans, width_factor=1.3)
+
     return model
