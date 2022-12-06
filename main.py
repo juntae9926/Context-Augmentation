@@ -5,6 +5,13 @@ from torchvision import datasets, transforms
 import torchvision.models as models
 from sklearn.metrics import average_precision_score, classification_report, confusion_matrix
 
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam import GuidedBackpropReLUModel
+from pytorch_grad_cam.utils.image import show_cam_on_image, \
+    deprocess_image, \
+    preprocess_image
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+
 import os
 import numpy as np
 from tqdm import tqdm
@@ -19,6 +26,9 @@ from schedulers import CosineAnnealingWarmUpRestarts
 
 import warnings
 warnings.filterwarnings(action='ignore')
+
+cam_sample=None
+cam_target=None
 
 def compute_mAP(targs, preds, class_ap=False):
     targs = targs.cpu().numpy()
@@ -190,6 +200,9 @@ def valid(args, model, criterion, valid_loader):
 
 def test(args, test_loader, save_dir=None):
 
+    global cam_sample
+    global cam_target
+    
     model = load_model(num_classes=80, pretrained=False).to(args.device)
     if save_dir:
         model.load_state_dict(torch.load(os.path.join(save_dir, "best.pth")))
@@ -214,8 +227,45 @@ def test(args, test_loader, save_dir=None):
     class_ap = 100 * APs.sum(axis=0) / (APs.shape[0] -1)
     mAP = class_ap.mean()
     print("mAP is {:0.2f} \nClass_aps are {}".format(mAP, np.round(class_ap, 2)))
+    
+    cam("test",cam_sample,cam_target,model)
 
+def cam(epoch,data,target,model):
+    method={"gradcam":GradCAM}
+    target_layers = [model.layer4[-1]]
+    rgb_img = data
+    rgb_img = np.float32(rgb_img) / 255
+    input_tensor = preprocess_image(rgb_img,
+                                    mean=mean,
+                                    std=std)
+    targets = [ClassifierOutputTarget(target)]
+    cam_algorithm = method['gradcam']
 
+    with cam_algorithm(model=model,
+                       target_layers=target_layers,
+                       use_cuda=True) as cam:
+        cam.batch_size = 32
+        grayscale_cam = cam(input_tensor=input_tensor,
+                            targets=targets,
+                            aug_smooth=False,
+                            eigen_smooth=False)
+
+        grayscale_cam = grayscale_cam[0, :]
+        cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+
+        # cam_image is RGB encoded whereas "cv2.imwrite" requires BGR encoding.
+        cam_image = cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR)
+
+    gb_model = GuidedBackpropReLUModel(model=model, use_cuda=True)
+    gb = gb_model(input_tensor, target_category=None)
+
+    cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
+    cam_gb = deprocess_image(cam_mask * gb)
+    gb = deprocess_image(gb)
+
+    cv2.imwrite('cam.jpg', cam_image)
+    cv2.imwrite('gb.jpg', gb)
+    cv2.imwrite('cam_gb.jpg', cam_gb)
 
 def main(args):
 
@@ -251,6 +301,9 @@ def main(args):
     train_loader = DataLoader(dataset_train, batch_size=args.batch_size,  shuffle=True, num_workers=args.num_workers, collate_fn=my_collate)
     valid_loader = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
+    cam_sample,targets=dataset_train.get_sample()
+    cam_target=targets.tolist().index(1)
+    
     if not args.test:
         # Model
         model = load_model(num_classes=80)
