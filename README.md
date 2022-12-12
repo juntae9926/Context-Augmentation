@@ -67,6 +67,11 @@ python3 main.py --lr 0.001 \
                 --rotate \
                 --save-dir runs/method
 ```
+## Pretrained-weights
+```
+pip install gdown
+gdown https://drive.google.com/uc?id=1wmSHTQnZbqFgaMIg-t-Ga3eocST5QVod
+```
 
 ## Results
 
@@ -79,8 +84,8 @@ use-method | 86.16 | 92.07 | 95.65 | 90. | 88.28 | 67.45 | 84.27 | 95.04 | 97.16
 ### MS-COCO
 class | mAP |
 --- | --- | 
-no-method |    | 
-use-method |  | 
+no-method |76.46| 
+use-method |76.31| 
 
 ## ToDo
 - [X] To test properly, AP score matrix for multi-label classification
@@ -89,6 +94,4 @@ use-method |  |
 - [X] Poisition randomness of attached object
 - [X] Size randomness of attached object
 - [X] Angle randomness of attached object
-- [ ] inpainting method to test trained model
 - [ ] Compare unrel_matrix and performances [evaluate heuristically]
-- [ ] Contrastive learning to prevent performance of majority pair(optinal)
