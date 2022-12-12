@@ -70,7 +70,7 @@ python3 main.py --lr 0.001 \
 ## Pretrained-weights
 ```
 pip install gdown
-gdown https://drive.google.com/uc?id=1wmSHTQnZbqFgaMIg-t-Ga3eocST5QVod
+gdown https://drive.google.com/uc?id=1wmSHTQnZbqFgaMIg-t-Ga3eocST5QVod # ResNet-101, K=30
 ```
 
 ## Results
